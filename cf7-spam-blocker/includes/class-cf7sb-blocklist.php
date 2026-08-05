@@ -180,8 +180,14 @@ class CF7SB_Blocklist {
 		if ( is_wp_error( $response ) ) {
 			return self::store_error( $response->get_error_message() );
 		}
-		if ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
-			return self::store_error( 'HTTP ' . wp_remote_retrieve_response_code( $response ) );
+		$code = wp_remote_retrieve_response_code( $response );
+		if ( 200 !== $code ) {
+			// サーバーがエラー内容を返していれば、そのまま伝える（原因の特定を容易にするため）
+			$detail = json_decode( wp_remote_retrieve_body( $response ), true );
+			$message = ( is_array( $detail ) && ! empty( $detail['error'] ) )
+				? $detail['error'] . '（HTTP ' . $code . '）'
+				: 'HTTP ' . $code;
+			return self::store_error( $message );
 		}
 		$data = json_decode( wp_remote_retrieve_body( $response ), true );
 		if ( ! is_array( $data ) ) {

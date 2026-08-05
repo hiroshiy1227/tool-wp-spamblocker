@@ -415,6 +415,15 @@ class CF7SB_Admin {
 				<?php endif; ?>
 			</p>
 
+			<?php if ( $fetch_error && ! CF7SB_Blocklist::local_api_target() && $settings['url'] ) : ?>
+				<div class="notice notice-warning inline" style="max-width:800px;">
+					<p>
+						中央サーバー（<code><?php echo esc_html( wp_parse_url( $settings['url'], PHP_URL_HOST ) ); ?></code>）側の問題の可能性があります。
+						このサイトは別サーバーのため自動修復できません。<strong>中央サーバーと同じサイトの管理画面</strong>を開き、「サーバーファイルを修復（キーを同期）」を実行してから、このページで「今すぐ再取得」を押してください。
+					</p>
+				</div>
+			<?php endif; ?>
+
 			<?php if ( $has_pending ) : ?>
 				<div class="notice notice-warning inline"><p><strong>⚠ 下の入力内容はまだ保存されていません。</strong>直前の保存が失敗したため、入力を復元して表示しています。上のエラーの原因を解消してから、もう一度「ブロックリストを保存」を押してください。</p></div>
 			<?php endif; ?>
