@@ -296,7 +296,7 @@ class CF7SB_Admin {
 
 			<?php if ( CF7SB_Server::is_enabled() ) : ?>
 				<div style="padding:1em 1.4em; background:#fff; border-left:4px solid #00a32a; box-shadow:0 1px 1px rgba(0,0,0,.04); max-width:800px; margin-bottom:1em;">
-					<p style="margin:0 0 0.6em; font-size:1.05em;"><strong>✅ このサイトは中央サーバーです。</strong>ブロックリストはこのサイトに保管され、接続した全サイトに配信されます。</p>
+					<p style="margin:0 0 0.6em; font-size:1.05em;"><span class="dashicons dashicons-yes-alt" style="color:#00a32a; vertical-align:text-bottom;"></span> <strong>このサイトは中央サーバーです。</strong>ブロックリストはこのサイトに保管され、接続した全サイトに配信されます。</p>
 					<p style="margin:0 0 0.4em;"><strong>他のサイトを追加する手順（コピペ1回）</strong></p>
 					<ol style="margin:0 0 1em;">
 						<li>新しいサイトにこのプラグインをインストール・有効化</li>
@@ -405,7 +405,7 @@ class CF7SB_Admin {
 			<?php endif; ?>
 
 			<?php if ( $has_pending ) : ?>
-				<div class="notice notice-warning inline"><p><strong>⚠ 下の入力内容はまだ保存されていません。</strong>直前の保存が失敗したため、入力を復元して表示しています。上のエラーの原因を解消してから、もう一度「ブロックリストを保存」を押してください。</p></div>
+				<div class="notice notice-warning inline"><p><span class="dashicons dashicons-warning" style="color:#dba617; vertical-align:text-bottom;"></span> <strong>下の入力内容はまだ保存されていません。</strong>直前の保存が失敗したため、入力を復元して表示しています。上のエラーの原因を解消してから、もう一度「ブロックリストを保存」を押してください。</p></div>
 			<?php endif; ?>
 
 			<?php if ( ! $can_edit ) : ?>
