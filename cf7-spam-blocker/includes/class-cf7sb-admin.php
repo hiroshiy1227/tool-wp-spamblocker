@@ -200,6 +200,28 @@ class CF7SB_Admin {
 			self::redirect_back( 'deploy_failed' );
 		}
 
+		// 書き込んだ場所が実際に公開URLで配信されているか検証する。
+		// サーバー構成によっては DOCUMENT_ROOT と公開ディレクトリが一致せず、
+		// 「書き込みは成功したのに古いファイルが配信され続ける」ことがあるため。
+		$verify = wp_remote_get(
+			add_query_arg( 'cf7sb_verify', time(), $settings['url'] ),
+			array( 'timeout' => 10 )
+		);
+		$verify_code = is_wp_error( $verify ) ? 0 : wp_remote_retrieve_response_code( $verify );
+
+		if ( 200 !== $verify_code ) {
+			$detail = is_wp_error( $verify )
+				? $verify->get_error_message()
+				: ( json_decode( wp_remote_retrieve_body( $verify ), true )['error'] ?? 'HTTP ' . $verify_code );
+
+			set_transient(
+				'cf7sb_last_error_' . get_current_user_id(),
+				'書き込み先: ' . $target . ' ／ URLからの応答: ' . $detail,
+				5 * MINUTE_IN_SECONDS
+			);
+			self::redirect_back( 'deploy_unverified' );
+		}
+
 		CF7SB_Blocklist::refresh();
 		self::redirect_back( 'server_deployed' );
 	}
@@ -253,6 +275,13 @@ class CF7SB_Admin {
 			'refreshed'       => array( 'success', 'ブロックリストを再取得しました。' ),
 			'server_deployed' => array( 'success', 'サーバーファイル（blocklist-api.php）を設置し、このサイトの秘密キーと同期しました。' ),
 			'deploy_failed'   => array( 'error', 'サーバーファイルの設置に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
+			'deploy_unverified' => array(
+				'error',
+				'ファイルは書き込めましたが、そのファイルが実際のURLで配信されていません。'
+				. 'サーバーの公開ディレクトリと書き込み先が異なる可能性があります。'
+				. '「サーバー設置ファイルをダウンロード」から取得したファイルを、FTPやファイルマネージャーでURLの場所に直接アップロードしてください。'
+				. ( $error ? '［' . $error . '］' : '' ),
+			),
 			'push_failed'     => array( 'error', 'ブロックリストの保存に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
 			'code_invalid'    => array( 'error', 'セットアップコードを読み取れませんでした。コピー元のサイトで表示されたコードを、そのまま全部貼り付けてください。' ),
 			'refresh_failed'  => array( 'error', 'ブロックリストの取得に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
@@ -400,7 +429,11 @@ class CF7SB_Admin {
 						<input type="hidden" name="action" value="cf7sb_deploy_server">
 						<button type="submit" class="button button-primary"><?php echo $target_exists ? 'サーバーファイルを修復（キーを同期）' : 'サーバーファイルを自動設置'; ?></button>
 					</form>
-					<p class="description" style="margin:0.6em 0 0;">このサイトの秘密キー（未設定なら自動生成）を埋め込んだ最新のファイルを書き込みます。登録済みのブロックリストのデータはそのまま保持されます。</p>
+					<p class="description" style="margin:0.6em 0 0;">
+						このサイトの秘密キー（未設定なら自動生成）を埋め込んだ最新のファイルを書き込みます。登録済みのブロックリストのデータはそのまま保持されます。<br>
+						書き込み先: <code><?php echo esc_html( $local_target ); ?></code><br>
+						※この場所が実際に公開されている場所と違う場合は、書き込みに成功してもURL上のファイルは変わりません。実行後に自動で検証し、食い違っていれば警告を表示します。
+					</p>
 				</div>
 			<?php endif; ?>
 
