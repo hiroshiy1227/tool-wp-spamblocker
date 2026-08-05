@@ -50,9 +50,6 @@ class CF7SB_Admin {
 			$settings['message'] = '送信できない内容が含まれています。';
 		}
 
-		$mode = isset( $_POST['cf7sb_mode'] ) ? sanitize_key( wp_unslash( $_POST['cf7sb_mode'] ) ) : 'field';
-		$settings['mode'] = in_array( $mode, array( 'field', 'stealth_error', 'fake_success' ), true ) ? $mode : 'field';
-
 		// セットアップコードが貼り付けられていれば、URL・キーをコードから一括設定
 		$code = sanitize_text_field( isset( $_POST['cf7sb_setup_code'] ) ? wp_unslash( $_POST['cf7sb_setup_code'] ) : '' );
 		if ( '' !== $code ) {
@@ -323,33 +320,10 @@ class CF7SB_Admin {
 						</td>
 					</tr>
 					<tr>
-						<th scope="row">ブロック時の動作</th>
-						<td>
-							<fieldset>
-								<label style="display:block; margin-bottom:0.6em;">
-									<input type="radio" name="cf7sb_mode" value="field" <?php checked( $settings['mode'], 'field' ); ?>>
-									<strong>該当欄にエラーを表示</strong>
-									<p class="description" style="margin:0.2em 0 0 1.6em;">下の「エラーメッセージ」を該当フィールドの下に表示します。原因の欄が相手に分かります。</p>
-								</label>
-								<label style="display:block; margin-bottom:0.6em;">
-									<input type="radio" name="cf7sb_mode" value="stealth_error" <?php checked( $settings['mode'], 'stealth_error' ); ?>>
-									<strong>原因を伏せた送信エラーにする</strong>
-									<p class="description" style="margin:0.2em 0 0 1.6em;">どの欄が原因かは示さず、「メッセージの送信に失敗しました。後でまたお試しください。」というサーバー障害風の表示になります（文言はCF7の「メッセージ」設定の「送信失敗」に従います）。</p>
-								</label>
-								<label style="display:block;">
-									<input type="radio" name="cf7sb_mode" value="fake_success" <?php checked( $settings['mode'], 'fake_success' ); ?>>
-									<strong>送信成功に見せかける（実際には送信しない）</strong>
-									<p class="description" style="margin:0.2em 0 0 1.6em;">通常の送信完了メッセージを表示しますが、メールは送信されません。相手はブロックに気づけません。⚠ 誤ってブロックされた正規の問い合わせも「成功」に見えるため、リストの内容は慎重に管理してください。</p>
-								</label>
-							</fieldset>
-						</td>
-					</tr>
-					<tr>
 						<th scope="row"><label for="cf7sb_message">ブロック時のエラーメッセージ</label></th>
 						<td>
 							<input type="text" id="cf7sb_message" name="cf7sb_message" class="regular-text"
 								value="<?php echo esc_attr( $settings['message'] ); ?>">
-							<p class="description">「該当欄にエラーを表示」モードのときに使われます。</p>
 						</td>
 					</tr>
 				</table>
