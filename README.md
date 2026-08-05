@@ -6,7 +6,6 @@ Contact Form 7 用の迷惑メールブロッカー。拒否ドメイン・拒�
 
 ```
 cf7-spam-blocker/        ← プラグイン本体（各サイトにインストール）
-  server/blocklist-api.tpl ← サーバー設置ファイルの雛形（設定画面からキー埋め込み済みでダウンロード可能）
 .github/workflows/release.yml ← タグpushでzipビルド＆Release自動作成
 build.sh                 ← 手動インストール用zip作成スクリプト
 ```
@@ -25,7 +24,7 @@ build.sh                 ← 手動インストール用zip作成スクリプト
 1. GitHubの **パブリック** リポジトリ [hiroshiy1227/tool-wp-spamblocker](https://github.com/hiroshiy1227/tool-wp-spamblocker) にこのディレクトリをpush
 2. リポジトリを移動・改名した場合は、`cf7-spam-blocker/cf7-spam-blocker.php` ヘッダーの `Update URI:` を新しいリポジトリURLに合わせる
 
-### 2. 1サイト目（かんたんセットアップ・推奨）
+### 2. 1サイト目
 
 1. [最新Releaseのzip](https://github.com/hiroshiy1227/tool-wp-spamblocker/releases/latest) を「プラグイン → 新規追加 → プラグインのアップロード」からインストール・有効化（初回のみ手動。以降はGitHub経由で更新）
 2. 「設定 → CF7 Spam Blocker → 初期セットアップ」タブで「**このサイトを中央サーバーにする**」ボタンを押す
@@ -39,10 +38,6 @@ build.sh                 ← 手動インストール用zip作成スクリプト
 
 - `?list=会社A` のようにリスト名を変えると、用途別（会社A用・会社B用・個人用など)に別リストを共有できます
 - 秘密キーを空にすると、そのサイトは閲覧・自動取得のみ（編集不可）になります
-
-### 補足: 外部サーバー方式（上級者向け）
-
-WordPressのないサーバーにリストを置きたい場合のみ、従来どおり `blocklist-api.php`（設定画面からダウンロード可能）を任意のサーバーに設置し、そのURLを指定する方式も使えます。
 
 ## リストの編集
 

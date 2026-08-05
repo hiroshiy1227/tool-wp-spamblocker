@@ -16,8 +16,6 @@ class CF7SB_Admin {
 		add_action( 'admin_post_cf7sb_save_settings', array( __CLASS__, 'handle_save_settings' ) );
 		add_action( 'admin_post_cf7sb_save_blocklist', array( __CLASS__, 'handle_save_blocklist' ) );
 		add_action( 'admin_post_cf7sb_refresh', array( __CLASS__, 'handle_refresh' ) );
-		add_action( 'admin_post_cf7sb_download_server', array( __CLASS__, 'handle_download_server' ) );
-		add_action( 'admin_post_cf7sb_deploy_server', array( __CLASS__, 'handle_deploy_server' ) );
 		add_action( 'admin_post_cf7sb_enable_server', array( __CLASS__, 'handle_enable_server' ) );
 		add_action( 'admin_post_cf7sb_disable_server', array( __CLASS__, 'handle_disable_server' ) );
 		add_action( 'admin_notices', array( __CLASS__, 'notices' ) );
@@ -172,121 +170,6 @@ class CF7SB_Admin {
 	}
 
 	/**
-	 * サーバー設置用の blocklist-api.php を、秘密キーを埋め込んだ状態でダウンロードさせる。
-	 * このサイトの秘密キーが未設定なら自動生成して設定にも保存する（再ダウンロードしても同じキー）。
-	 */
-	public static function handle_download_server() {
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( '権限がありません。' );
-		}
-		check_admin_referer( 'cf7sb_download_server' );
-
-		$settings = CF7SB_Blocklist::get_settings();
-		if ( '' === $settings['key'] ) {
-			$settings['key'] = 'cf7sb-' . bin2hex( random_bytes( 20 ) );
-			update_option( CF7SB_Blocklist::OPTION_SETTINGS, $settings, false );
-		}
-
-		$template = file_get_contents( CF7SB_DIR . 'server/blocklist-api.tpl' );
-		if ( false === $template ) {
-			wp_die( 'テンプレートファイルが見つかりません。プラグインを再インストールしてください。' );
-		}
-
-		$file = preg_replace(
-			"/const CF7SB_API_KEY = '[^']*';/",
-			"const CF7SB_API_KEY = '" . $settings['key'] . "';",
-			$template,
-			1
-		);
-
-		nocache_headers();
-		header( 'Content-Type: application/octet-stream' );
-		header( 'Content-Disposition: attachment; filename="blocklist-api.php"' );
-		header( 'Content-Length: ' . strlen( $file ) );
-		echo $file; // phpcs:ignore WordPress.Security.EscapeOutput
-		exit;
-	}
-
-	/**
-	 * APIがこのサイトと同じサーバーにある場合、blocklist-api.php をFTPなしで直接設置・修復する。
-	 * このサイトの秘密キーを埋め込んで書き込む（キーが未設定なら自動生成して保存）。
-	 * リストデータ（lists/ ディレクトリ）には触れない。
-	 */
-	public static function handle_deploy_server() {
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( '権限がありません。' );
-		}
-		check_admin_referer( 'cf7sb_deploy_server' );
-
-		$target = CF7SB_Blocklist::local_api_target();
-		if ( ! $target ) {
-			set_transient( 'cf7sb_last_error_' . get_current_user_id(), 'ブロックリストURLがこのサイトと同じサーバーを指していないため、自動設置できません。', MINUTE_IN_SECONDS );
-			self::redirect_back( 'deploy_failed', 'setup' );
-		}
-
-		$settings = CF7SB_Blocklist::get_settings();
-		if ( '' === $settings['key'] ) {
-			$settings['key'] = 'cf7sb-' . bin2hex( random_bytes( 20 ) );
-			update_option( CF7SB_Blocklist::OPTION_SETTINGS, $settings, false );
-		}
-
-		$template = file_get_contents( CF7SB_DIR . 'server/blocklist-api.tpl' );
-		if ( false === $template ) {
-			set_transient( 'cf7sb_last_error_' . get_current_user_id(), 'テンプレートファイルが見つかりません。プラグインを再インストールしてください。', MINUTE_IN_SECONDS );
-			self::redirect_back( 'deploy_failed', 'setup' );
-		}
-
-		$file = preg_replace(
-			"/const CF7SB_API_KEY = '[^']*';/",
-			'const CF7SB_API_KEY = ' . var_export( $settings['key'], true ) . ';',
-			$template,
-			1
-		);
-
-		$dir = dirname( $target );
-		if ( ! is_dir( $dir ) && ! mkdir( $dir, 0755, true ) ) {
-			set_transient( 'cf7sb_last_error_' . get_current_user_id(), '設置先ディレクトリを作成できませんでした（書き込み権限を確認してください）。', MINUTE_IN_SECONDS );
-			self::redirect_back( 'deploy_failed', 'setup' );
-		}
-		if ( false === file_put_contents( $target, $file, LOCK_EX ) ) {
-			set_transient( 'cf7sb_last_error_' . get_current_user_id(), 'ファイルを書き込めませんでした（書き込み権限を確認してください）。', MINUTE_IN_SECONDS );
-			self::redirect_back( 'deploy_failed', 'setup' );
-		}
-
-		// PHPのOPcacheに古いコンパイル結果が残っていると、ファイルを差し替えても
-		// 旧バージョンが実行され続けることがあるため、明示的に破棄する
-		if ( function_exists( 'opcache_invalidate' ) ) {
-			@opcache_invalidate( $target, true );
-		}
-		clearstatcache( true, $target );
-
-		// 書き込んだ場所が実際に公開URLで配信されているか検証する。
-		// サーバー構成によっては DOCUMENT_ROOT と公開ディレクトリが一致せず、
-		// 「書き込みは成功したのに古いファイルが配信され続ける」ことがあるため。
-		$verify = wp_remote_get(
-			add_query_arg( 'cf7sb_verify', time(), $settings['url'] ),
-			array( 'timeout' => 10 )
-		);
-		$verify_code = is_wp_error( $verify ) ? 0 : wp_remote_retrieve_response_code( $verify );
-
-		if ( 200 !== $verify_code ) {
-			$detail = is_wp_error( $verify )
-				? $verify->get_error_message()
-				: ( json_decode( wp_remote_retrieve_body( $verify ), true )['error'] ?? 'HTTP ' . $verify_code );
-
-			set_transient(
-				'cf7sb_last_error_' . get_current_user_id(),
-				'書き込み先: ' . $target . ' ／ URLからの応答: ' . $detail,
-				5 * MINUTE_IN_SECONDS
-			);
-			self::redirect_back( 'deploy_unverified', 'setup' );
-		}
-
-		CF7SB_Blocklist::refresh();
-		self::redirect_back( 'server_deployed', 'setup' );
-	}
-
-	/**
 	 * セットアップコード（URL＋キーをまとめた文字列）の生成と復元。
 	 * 形式: CF7SB1:<base64({"url":"...","key":"..."})>
 	 */
@@ -333,17 +216,8 @@ class CF7SB_Admin {
 			'settings_saved'  => array( 'success', '接続設定を保存しました。' ),
 			'blocklist_saved' => array( 'success', 'ブロックリストを中央サーバーに保存しました。同じリストを参照する全サイトに反映されます（各サイトの次回取得時）。' ),
 			'refreshed'       => array( 'success', 'ブロックリストを再取得しました。' ),
-			'server_deployed' => array( 'success', 'サーバーファイル（blocklist-api.php）を設置し、このサイトの秘密キーと同期しました。' ),
 			'server_enabled'  => array( 'success', 'このサイトを中央サーバーにしました。他のサイトは、下の「セットアップコード」を貼り付けるだけで接続できます。' ),
 			'server_disabled' => array( 'success', '中央サーバー機能を停止しました（保存済みのリストデータは残っています）。' ),
-			'deploy_failed'   => array( 'error', 'サーバーファイルの設置に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
-			'deploy_unverified' => array(
-				'error',
-				'ファイルは書き込めましたが、そのファイルが実際のURLで配信されていません。'
-				. 'サーバーの公開ディレクトリと書き込み先が異なる可能性があります。'
-				. '「サーバー設置ファイルをダウンロード」から取得したファイルを、FTPやファイルマネージャーでURLの場所に直接アップロードしてください。'
-				. ( $error ? '［' . $error . '］' : '' ),
-			),
 			'push_failed'     => array( 'error', 'ブロックリストの保存に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
 			'code_invalid'    => array( 'error', 'セットアップコードを読み取れませんでした。コピー元のサイトで表示されたコードを、そのまま全部貼り付けてください。' ),
 			'refresh_failed'  => array( 'error', 'ブロックリストの取得に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
@@ -444,7 +318,6 @@ class CF7SB_Admin {
 				</div>
 			<?php else : ?>
 				<div style="padding:1em 1.4em; background:#fff; border-left:4px solid #2271b1; box-shadow:0 1px 1px rgba(0,0,0,.04); max-width:800px; margin-bottom:1em;">
-					<p style="margin:0 0 0.6em; font-size:1.05em;"><strong>かんたんセットアップ（推奨）</strong> — ファイル設置・FTP・キー管理は不要です。</p>
 					<p style="margin:0 0 0.4em;"><strong>1サイト目（ブロックリストの保管場所にするサイト）:</strong></p>
 					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0 0 0.8em;">
 						<?php wp_nonce_field( 'cf7sb_enable_server' ); ?>
@@ -457,63 +330,6 @@ class CF7SB_Admin {
 				</div>
 			<?php endif; ?>
 
-			<details style="max-width:800px; margin-bottom:1em;">
-				<summary style="cursor:pointer; padding:0.4em 0;">外部サーバー方式（従来・上級者向け）— WordPressのないサーバーにリストを置きたい場合のみ</summary>
-			<div style="padding:0.8em 1.2em; background:#fff; border:1px solid #c3c4c7; border-radius:4px; margin-top:0.5em;">
-				<ol style="margin-top:0;">
-					<li style="margin-bottom:1em;">
-						<strong>サーバー設置ファイルをダウンロード</strong><br>
-						ブロックリストを保管する <code>blocklist-api.php</code> を、秘密キー設定済みの状態でダウンロードします（ファイルの編集は不要です）。
-						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0.5em 0;">
-							<?php wp_nonce_field( 'cf7sb_download_server' ); ?>
-							<input type="hidden" name="action" value="cf7sb_download_server">
-							<button type="submit" class="button button-primary">サーバー設置ファイルをダウンロード</button>
-						</form>
-						<p class="description">このサイトの「書き込み用秘密キー」が未設定の場合は、安全なキーを自動生成して下の設定欄にも保存します（画面を再読み込みすると表示されます）。</p>
-					</li>
-					<li style="margin-bottom:1em;">
-						<strong>サーバーにアップロード</strong><br>
-						FTPなどで、管理しているサーバーの任意の場所に設置します（例: <code>https://example.com/cf7sb/blocklist-api.php</code>）。設置は全サイト共通で<strong>1回だけ</strong>です。
-						<p class="description" style="margin:0.3em 0 0;">※ 設置先が<strong>このサイトと同じサーバー</strong>の場合は、手順3でURLを保存すると「サーバーファイルを自動設置」ボタンが現れ、ダウンロードもFTPも不要になります。</p>
-					</li>
-					<li style="margin-bottom:1em;">
-						<strong>接続設定を保存</strong><br>
-						設置先のURLを「接続設定」タブの「ブロックリストURL」に入力して「接続設定を保存」。保存後に「最終取得」の日時が表示されれば接続成功です。<code>?list=会社A</code> のようにリスト名を付けると、用途別に別のリストを共有できます。
-					</li>
-					<li style="margin-bottom:1em;">
-						<strong>ブロック条件を登録</strong><br>
-						「ブロック設定」タブで拒否ドメイン・拒否メールアドレス・拒否文字列を1行1件で入力して保存します。
-					</li>
-					<li style="margin-bottom:1em;">
-						<strong>2サイト目以降</strong><br>
-						ファイル設置は不要です。設定済みサイトの「セットアップコード」をコピーし、新しいサイトの同じ欄に貼り付けて保存するだけで、URLと秘密キーが一括設定され同じリストが共有されます。
-					</li>
-				</ol>
-			</div>
-
-			<?php
-			$local_target = CF7SB_Server::is_enabled() ? null : CF7SB_Blocklist::local_api_target();
-			if ( $local_target ) :
-				$target_exists = is_file( $local_target );
-			?>
-				<div style="margin:0 0 1em; padding:0.8em 1.2em; background:#fff; border-left:4px solid #2271b1; box-shadow:0 1px 1px rgba(0,0,0,.04); max-width:800px;">
-					<p style="margin:0 0 0.6em;">
-						<strong>ブロックリストURLはこのサイトと同じサーバーです。</strong>
-						FTPを使わずに、ここからサーバーファイル（blocklist-api.php）を直接<?php echo $target_exists ? '修復・更新' : '設置'; ?>できます。
-					</p>
-					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0;">
-						<?php wp_nonce_field( 'cf7sb_deploy_server' ); ?>
-						<input type="hidden" name="action" value="cf7sb_deploy_server">
-						<button type="submit" class="button button-primary"><?php echo $target_exists ? 'サーバーファイルを修復（キーを同期）' : 'サーバーファイルを自動設置'; ?></button>
-					</form>
-					<p class="description" style="margin:0.6em 0 0;">
-						このサイトの秘密キー（未設定なら自動生成）を埋め込んだ最新のファイルを書き込みます。登録済みのブロックリストのデータはそのまま保持されます。<br>
-						書き込み先: <code><?php echo esc_html( $local_target ); ?></code><br>
-						※この場所が実際に公開されている場所と違う場合は、書き込みに成功してもURL上のファイルは変わりません。実行後に自動で検証し、食い違っていれば警告を表示します。
-					</p>
-				</div>
-			<?php endif; ?>
-			</details>
 			<?php endif; ?>
 
 			<?php if ( 'connection' === $tab ) : ?>
@@ -579,7 +395,7 @@ class CF7SB_Admin {
 				<?php endif; ?>
 			</p>
 
-			<?php if ( $fetch_error && ! CF7SB_Blocklist::local_api_target() && $settings['url'] ) : ?>
+			<?php if ( $fetch_error && $settings['url'] && ! CF7SB_Server::is_enabled() ) : ?>
 				<div class="notice notice-warning inline" style="max-width:800px;">
 					<p>
 						中央サーバー（<code><?php echo esc_html( wp_parse_url( $settings['url'], PHP_URL_HOST ) ); ?></code>）側の問題の可能性があります。

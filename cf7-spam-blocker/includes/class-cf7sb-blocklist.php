@@ -84,67 +84,6 @@ class CF7SB_Blocklist {
 		return self::get_setting( 'message' );
 	}
 
-	/**
-	 * APIのURLがこのサイト自身と同じサーバーを指す場合、blocklist-api.php の設置先パスを返す。
-	 * ファイルが未設置でもパスを返す（自動設置に使う）。別サーバーなら null。
-	 *
-	 * @return string|null
-	 */
-	public static function local_api_target() {
-		$url = self::get_setting( 'url' );
-		if ( ! $url ) {
-			return null;
-		}
-		$api  = wp_parse_url( $url );
-		$site = wp_parse_url( home_url() );
-		if ( empty( $api['host'] ) || empty( $site['host'] )
-			|| strtolower( $api['host'] ) !== strtolower( $site['host'] ) ) {
-			return null;
-		}
-		$api_port  = isset( $api['port'] ) ? (int) $api['port'] : null;
-		$site_port = isset( $site['port'] ) ? (int) $site['port'] : null;
-		if ( $api_port !== $site_port ) {
-			return null;
-		}
-		if ( empty( $_SERVER['DOCUMENT_ROOT'] ) || empty( $api['path'] ) ) {
-			return null;
-		}
-		$path = $api['path'];
-		if ( '.php' !== substr( $path, -4 ) || false !== strpos( $path, '..' ) ) {
-			return null;
-		}
-		return rtrim( wp_unslash( $_SERVER['DOCUMENT_ROOT'] ), '/' ) . $path;
-	}
-
-	/**
-	 * APIのURLがこのサイト自身と同じサーバーを指し、かつファイルが実在する場合にそのパスを返す。
-	 * 同一サーバーではHTTPを介さず直接ファイルを読み書きすることで、
-	 * ホスティングのレートリミット（HTTP 429）を回避しつつ高速化する。
-	 *
-	 * @return string|null
-	 */
-	private static function local_api_file() {
-		$target = self::local_api_target();
-		if ( ! $target ) {
-			return null;
-		}
-		$file = realpath( $target );
-		return ( $file && is_file( $file ) ) ? $file : null;
-	}
-
-	/**
-	 * URLの ?list= からリスト名を取り出す（サーバー側と同じルール）。
-	 */
-	private static function list_name() {
-		$query = wp_parse_url( self::get_setting( 'url' ), PHP_URL_QUERY );
-		$args  = array();
-		if ( $query ) {
-			parse_str( $query, $args );
-		}
-		$list = isset( $args['list'] ) && is_string( $args['list'] ) ? $args['list'] : 'default';
-		return preg_match( '/^[a-zA-Z0-9_-]{1,50}$/', $list ) ? $list : 'default';
-	}
-
 	private static function store_lists( $domains, $keywords, $emails = array(), $message = '', $patterns = array(), $block_uuid = true ) {
 		$stored               = get_option( self::OPTION_LIST, array() );
 		$stored['domains']    = self::sanitize_lines( $domains );
@@ -210,29 +149,6 @@ class CF7SB_Blocklist {
 		if ( null !== $server_list ) {
 			$data = CF7SB_Server::get_list( $server_list );
 			self::store_lists( $data['domains'], $data['keywords'], $data['emails'], $data['message'], $data['patterns'], $data['block_uuid'] );
-			return true;
-		}
-
-		// 同一サーバーならファイルを直接読む
-		$local = self::local_api_file();
-		if ( $local ) {
-			$json_file = dirname( $local ) . '/lists/' . self::list_name() . '.json';
-			if ( ! is_file( $json_file ) ) {
-				self::store_lists( array(), array() ); // まだ一度も保存されていないリスト
-				return true;
-			}
-			$data = json_decode( (string) file_get_contents( $json_file ), true );
-			if ( ! is_array( $data ) ) {
-				return self::store_error( 'リストファイルの読み取りに失敗しました。' );
-			}
-			self::store_lists(
-				isset( $data['domains'] ) ? $data['domains'] : array(),
-				isset( $data['keywords'] ) ? $data['keywords'] : array(),
-				isset( $data['emails'] ) ? $data['emails'] : array(),
-				isset( $data['message'] ) ? $data['message'] : '',
-				isset( $data['patterns'] ) ? $data['patterns'] : array(),
-				isset( $data['block_uuid'] ) ? (bool) $data['block_uuid'] : true
-			);
 			return true;
 		}
 
@@ -308,38 +224,6 @@ class CF7SB_Blocklist {
 				'message'  => $clean_message,
 			) );
 			self::store_lists( $saved['domains'], $saved['keywords'], $saved['emails'], $saved['message'], $saved['patterns'], isset( $saved['block_uuid'] ) ? (bool) $saved['block_uuid'] : true );
-			return true;
-		}
-
-		// 同一サーバーならファイルを直接書く
-		$local = self::local_api_file();
-		if ( $local ) {
-			// サーバーファイル内のキーと照合（HTTP経由と同じ認可チェック）
-			$contents = (string) file_get_contents( $local );
-			if ( ! preg_match( "/const CF7SB_API_KEY = '([^']*)';/", $contents, $m ) || ! hash_equals( $m[1], $key ) ) {
-				return new WP_Error( 'cf7sb_push_failed', '秘密キーが一致しません。' );
-			}
-
-			$dir = dirname( $local ) . '/lists';
-			if ( ! is_dir( $dir ) && ! mkdir( $dir, 0755, true ) ) {
-				return new WP_Error( 'cf7sb_push_failed', '保存先ディレクトリを作成できません。' );
-			}
-			$payload = array(
-				'domains'  => $clean_domains,
-				'emails'   => $clean_emails,
-				'keywords' => $clean_keywords,
-				'patterns' => $clean_patterns,
-			'block_uuid' => $block_uuid,
-				'block_uuid' => $block_uuid,
-				'message'  => $clean_message,
-				'updated'  => date( 'c' ),
-			);
-			$json = wp_json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT );
-			if ( false === file_put_contents( $dir . '/' . self::list_name() . '.json', $json, LOCK_EX ) ) {
-				return new WP_Error( 'cf7sb_push_failed', 'ファイルの書き込みに失敗しました。' );
-			}
-
-			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message, $clean_patterns, $block_uuid );
 			return true;
 		}
 
