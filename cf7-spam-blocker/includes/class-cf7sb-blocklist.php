@@ -37,6 +37,7 @@ class CF7SB_Blocklist {
 			'url'     => '',
 			'key'     => '',
 			'message' => '送信できない内容が含まれています。',
+			'mode'    => 'field',
 		);
 		return wp_parse_args( (array) get_option( self::OPTION_SETTINGS, array() ), $defaults );
 	}
