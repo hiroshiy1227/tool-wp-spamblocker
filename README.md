@@ -22,12 +22,12 @@ build.sh                 ← 手動インストール用zip作成スクリプト
 
 ### 1. GitHubリポジトリ（プラグイン本体の配布・更新用）
 
-1. GitHubの **パブリック** リポジトリ [hiroshiy1227/tool-wpplugin-spamblocker](https://github.com/hiroshiy1227/tool-wpplugin-spamblocker) にこのディレクトリをpush
+1. GitHubの **パブリック** リポジトリ [hiroshiy1227/tool-wp-spamblocker](https://github.com/hiroshiy1227/tool-wp-spamblocker) にこのディレクトリをpush
 2. リポジトリを移動・改名した場合は、`cf7-spam-blocker/cf7-spam-blocker.php` ヘッダーの `Update URI:` を新しいリポジトリURLに合わせる
 
 ### 2. 1サイト目（かんたんセットアップ・推奨）
 
-1. [最新Releaseのzip](https://github.com/hiroshiy1227/tool-wpplugin-spamblocker/releases/latest) を「プラグイン → 新規追加 → プラグインのアップロード」からインストール・有効化（初回のみ手動。以降はGitHub経由で更新）
+1. [最新Releaseのzip](https://github.com/hiroshiy1227/tool-wp-spamblocker/releases/latest) を「プラグイン → 新規追加 → プラグインのアップロード」からインストール・有効化（初回のみ手動。以降はGitHub経由で更新）
 2. 「設定 → CF7 Spam Blocker → 初期セットアップ」タブで「**このサイトを中央サーバーにする**」ボタンを押す
 
 これだけです。プラグイン自身がWordPressのREST API（`/wp-json/cf7sb/v1/list`）でリストを配信するため、**外部ファイルの設置・FTP・キー管理は不要**です。リストはこのサイトのDB（wp_options）に保存されます。

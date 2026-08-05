@@ -2,18 +2,18 @@
 /**
  * Plugin Name: CF7 Spam Blocker
  * Description: Contact Form 7 の送信を中央ブロックリスト（拒否ドメイン・拒否メールアドレス・拒否文字列）で検証する迷惑メールブロッカー。リストは複数サイトで共有できます。
- * Version: 2.1.0
+ * Version: 2.1.1
  * Author: Hiroshi Yoshida
  * Requires at least: 5.8
  * Requires PHP: 7.4
- * Update URI: https://github.com/hiroshiy1227/tool-wpplugin-spamblocker
+ * Update URI: https://github.com/hiroshiy1227/tool-wp-spamblocker
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CF7SB_VERSION', '2.1.0' );
+define( 'CF7SB_VERSION', '2.1.1' );
 define( 'CF7SB_FILE', __FILE__ );
 define( 'CF7SB_DIR', plugin_dir_path( __FILE__ ) );
 
