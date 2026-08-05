@@ -60,13 +60,17 @@ class CF7SB_Blocklist {
 		}
 
 		return array(
-			'domains'  => isset( $stored['domains'] ) ? (array) $stored['domains'] : array(),
-			'emails'   => isset( $stored['emails'] ) ? (array) $stored['emails'] : array(),
-			'keywords' => isset( $stored['keywords'] ) ? (array) $stored['keywords'] : array(),
-			'patterns' => isset( $stored['patterns'] ) ? (array) $stored['patterns'] : array(),
-			'message'  => isset( $stored['message'] ) ? (string) $stored['message'] : '',
+			'domains'    => isset( $stored['domains'] ) ? (array) $stored['domains'] : array(),
+			'emails'     => isset( $stored['emails'] ) ? (array) $stored['emails'] : array(),
+			'keywords'   => isset( $stored['keywords'] ) ? (array) $stored['keywords'] : array(),
+			'patterns'   => isset( $stored['patterns'] ) ? (array) $stored['patterns'] : array(),
+			'message'    => isset( $stored['message'] ) ? (string) $stored['message'] : '',
+			'block_uuid' => isset( $stored['block_uuid'] ) ? (bool) $stored['block_uuid'] : true,
 		);
 	}
+
+	/** 内蔵ルール: UUID形式（迷惑メールの「管理番号」等）の正規表現 */
+	const UUID_PATTERN = '\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b';
 
 	/**
 	 * ブロック時に表示するメッセージ（全サイト共通）。
@@ -141,13 +145,14 @@ class CF7SB_Blocklist {
 		return preg_match( '/^[a-zA-Z0-9_-]{1,50}$/', $list ) ? $list : 'default';
 	}
 
-	private static function store_lists( $domains, $keywords, $emails = array(), $message = '', $patterns = array() ) {
+	private static function store_lists( $domains, $keywords, $emails = array(), $message = '', $patterns = array(), $block_uuid = true ) {
 		$stored               = get_option( self::OPTION_LIST, array() );
 		$stored['domains']    = self::sanitize_lines( $domains );
 		$stored['emails']     = self::sanitize_lines( $emails );
 		$stored['keywords']   = self::sanitize_lines( $keywords );
 		$stored['patterns']   = self::sanitize_patterns( $patterns );
 		$stored['message']    = trim( wp_strip_all_tags( (string) $message ) );
+		$stored['block_uuid'] = (bool) $block_uuid;
 		$stored['fetched_at'] = time();
 		$stored['error']      = '';
 		update_option( self::OPTION_LIST, $stored, false );
@@ -204,7 +209,7 @@ class CF7SB_Blocklist {
 		$server_list = CF7SB_Server::local_list_name( $url );
 		if ( null !== $server_list ) {
 			$data = CF7SB_Server::get_list( $server_list );
-			self::store_lists( $data['domains'], $data['keywords'], $data['emails'], $data['message'], $data['patterns'] );
+			self::store_lists( $data['domains'], $data['keywords'], $data['emails'], $data['message'], $data['patterns'], $data['block_uuid'] );
 			return true;
 		}
 
@@ -225,7 +230,8 @@ class CF7SB_Blocklist {
 				isset( $data['keywords'] ) ? $data['keywords'] : array(),
 				isset( $data['emails'] ) ? $data['emails'] : array(),
 				isset( $data['message'] ) ? $data['message'] : '',
-				isset( $data['patterns'] ) ? $data['patterns'] : array()
+				isset( $data['patterns'] ) ? $data['patterns'] : array(),
+				isset( $data['block_uuid'] ) ? (bool) $data['block_uuid'] : true
 			);
 			return true;
 		}
@@ -255,7 +261,8 @@ class CF7SB_Blocklist {
 			isset( $data['keywords'] ) ? $data['keywords'] : array(),
 			isset( $data['emails'] ) ? $data['emails'] : array(),
 			isset( $data['message'] ) ? $data['message'] : '',
-			isset( $data['patterns'] ) ? $data['patterns'] : array()
+			isset( $data['patterns'] ) ? $data['patterns'] : array(),
+				isset( $data['block_uuid'] ) ? (bool) $data['block_uuid'] : true
 		);
 		return true;
 	}
@@ -267,7 +274,8 @@ class CF7SB_Blocklist {
 	 * @param string[] $keywords
 	 * @return true|WP_Error
 	 */
-	public static function push( $domains, $keywords, $emails = array(), $message = '', $patterns = array() ) {
+	public static function push( $domains, $keywords, $emails = array(), $message = '', $patterns = array(), $block_uuid = true ) {
+		$block_uuid = (bool) $block_uuid;
 		$url = self::get_setting( 'url' );
 		$key = self::get_setting( 'key' );
 
@@ -295,9 +303,11 @@ class CF7SB_Blocklist {
 				'emails'   => $clean_emails,
 				'keywords' => $clean_keywords,
 				'patterns' => $clean_patterns,
+			'block_uuid' => $block_uuid,
+				'block_uuid' => $block_uuid,
 				'message'  => $clean_message,
 			) );
-			self::store_lists( $saved['domains'], $saved['keywords'], $saved['emails'], $saved['message'], $saved['patterns'] );
+			self::store_lists( $saved['domains'], $saved['keywords'], $saved['emails'], $saved['message'], $saved['patterns'], isset( $saved['block_uuid'] ) ? (bool) $saved['block_uuid'] : true );
 			return true;
 		}
 
@@ -319,6 +329,8 @@ class CF7SB_Blocklist {
 				'emails'   => $clean_emails,
 				'keywords' => $clean_keywords,
 				'patterns' => $clean_patterns,
+			'block_uuid' => $block_uuid,
+				'block_uuid' => $block_uuid,
 				'message'  => $clean_message,
 				'updated'  => date( 'c' ),
 			);
@@ -327,7 +339,7 @@ class CF7SB_Blocklist {
 				return new WP_Error( 'cf7sb_push_failed', 'ファイルの書き込みに失敗しました。' );
 			}
 
-			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message, $clean_patterns );
+			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message, $clean_patterns, $block_uuid );
 			return true;
 		}
 
@@ -336,6 +348,7 @@ class CF7SB_Blocklist {
 			'emails'   => $clean_emails,
 			'keywords' => $clean_keywords,
 			'patterns' => $clean_patterns,
+			'block_uuid' => $block_uuid,
 			'message'  => $clean_message,
 		) );
 
@@ -370,10 +383,11 @@ class CF7SB_Blocklist {
 				isset( $saved['keywords'] ) ? $saved['keywords'] : array(),
 				isset( $saved['emails'] ) ? $saved['emails'] : array(),
 				isset( $saved['message'] ) ? $saved['message'] : $clean_message,
-				isset( $saved['patterns'] ) ? $saved['patterns'] : $clean_patterns
+				isset( $saved['patterns'] ) ? $saved['patterns'] : $clean_patterns,
+				isset( $saved['block_uuid'] ) ? (bool) $saved['block_uuid'] : $block_uuid
 			);
 		} else {
-			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message, $clean_patterns );
+			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message, $clean_patterns, $block_uuid );
 		}
 		return true;
 	}

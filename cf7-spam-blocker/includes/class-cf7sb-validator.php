@@ -189,6 +189,13 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 			return false;
 		}
 		$list = CF7SB_Blocklist::get();
+
+		// 内蔵ルール: UUID形式の管理番号（設定でON/OFF可・全サイト共通）
+		if ( ! empty( $list['block_uuid'] )
+			&& 1 === @preg_match( CF7SB_Blocklist::wrap_pattern( CF7SB_Blocklist::UUID_PATTERN ), $value ) ) {
+			return true;
+		}
+
 		foreach ( $list['patterns'] as $pattern ) {
 			if ( 1 === @preg_match( CF7SB_Blocklist::wrap_pattern( $pattern ), $value ) ) {
 				return true;

@@ -96,8 +96,9 @@ class CF7SB_Admin {
 		if ( '' === $message_text ) {
 			$message_text = '迷惑行為と判定されたため送信を拒否しました。';
 		}
+		$block_uuid = ! empty( $_POST['cf7sb_block_uuid'] );
 
-		$pending = array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'patterns' => $patterns_text, 'message' => $message_text );
+		$pending = array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'patterns' => $patterns_text, 'message' => $message_text, 'block_uuid' => $block_uuid );
 
 		// 正規表現として不正なパターンは保存前に弾いて知らせる（黙って消さない）
 		$invalid_patterns = array();
@@ -118,7 +119,8 @@ class CF7SB_Admin {
 			self::textarea_to_array( $keywords_text ),
 			self::textarea_to_array( $emails_text ),
 			$message_text,
-			preg_split( '/\r\n|\r|\n/', $patterns_text )
+			preg_split( '/\r\n|\r|\n/', $patterns_text ),
+			$block_uuid
 		);
 		if ( is_wp_error( $pushed ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $pushed->get_error_message(), MINUTE_IN_SECONDS );
@@ -364,6 +366,18 @@ class CF7SB_Admin {
 		}
 
 		$settings = CF7SB_Blocklist::get_settings();
+
+		// 表示するタブ（未指定時は、未設定サイトならセットアップ、設定済みならブロック設定）
+		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
+		if ( ! in_array( $tab, array( 'setup', 'connection', 'blocklist' ), true ) ) {
+			$tab = ( '' === $settings['url'] ) ? 'setup' : 'blocklist';
+		}
+
+		// ブロック設定タブを開いたら常に最新を取得（「今すぐ再取得」ボタンの代わり）
+		if ( 'blocklist' === $tab && '' !== $settings['url'] ) {
+			CF7SB_Blocklist::refresh();
+		}
+
 		$stored   = get_option( CF7SB_Blocklist::OPTION_LIST, array() );
 		$list     = CF7SB_Blocklist::get();
 		$can_edit = ( '' !== $settings['key'] );
@@ -393,11 +407,6 @@ class CF7SB_Admin {
 		// 誤設定防止: 中央サーバー以外のサイトでは、接続済みならURL・キーは閲覧のみ
 		$conn_locked = ! CF7SB_Server::is_enabled() && '' !== $settings['url'];
 
-		// 表示するタブ（未指定時は、未設定サイトならセットアップ、設定済みならブロック設定）
-		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
-		if ( ! in_array( $tab, array( 'setup', 'connection', 'blocklist' ), true ) ) {
-			$tab = ( '' === $settings['url'] ) ? 'setup' : 'blocklist';
-		}
 		$base_url = admin_url( 'options-general.php?page=cf7sb' );
 		?>
 		<div class="wrap">
@@ -574,7 +583,7 @@ class CF7SB_Admin {
 				<div class="notice notice-warning inline" style="max-width:800px;">
 					<p>
 						中央サーバー（<code><?php echo esc_html( wp_parse_url( $settings['url'], PHP_URL_HOST ) ); ?></code>）側の問題の可能性があります。
-						このサイトは別サーバーのため自動修復できません。<strong>中央サーバーと同じサイトの管理画面</strong>を開き、「サーバーファイルを修復（キーを同期）」を実行してから、このページで「今すぐ再取得」を押してください。
+						このサイトは別サーバーのため自動修復できません。<strong>中央サーバーと同じサイトの管理画面</strong>を開いて問題を解消してから、このタブを開き直してください。
 					</p>
 				</div>
 			<?php endif; ?>
@@ -583,17 +592,11 @@ class CF7SB_Admin {
 				<div class="notice notice-warning inline"><p><strong>⚠ 下の入力内容はまだ保存されていません。</strong>直前の保存が失敗したため、入力を復元して表示しています。上のエラーの原因を解消してから、もう一度「ブロックリストを保存」を押してください。</p></div>
 			<?php endif; ?>
 
-			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline-block; margin-bottom:1em;">
-				<?php wp_nonce_field( 'cf7sb_refresh' ); ?>
-				<input type="hidden" name="action" value="cf7sb_refresh">
-				<?php submit_button( '今すぐ再取得', 'secondary', 'submit', false ); ?>
-			</form>
-
 			<?php if ( ! $can_edit ) : ?>
 				<div class="notice notice-info inline"><p>書き込み用秘密キーが未設定のため、このサイトからは編集できません（自動取得は動作します）。</p></div>
 			<?php endif; ?>
 
-			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" id="cf7sb_blocklist_form" data-pending="<?php echo $has_pending ? '1' : '0'; ?>">
 				<?php wp_nonce_field( 'cf7sb_save_blocklist' ); ?>
 				<input type="hidden" name="action" value="cf7sb_save_blocklist">
 				<table class="form-table" role="presentation">
@@ -627,6 +630,17 @@ class CF7SB_Admin {
 							<textarea id="cf7sb_keywords" name="cf7sb_keywords" rows="8" class="large-text code"
 								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $keywords_text ); ?></textarea>
 							<p class="description">本文・テキスト欄にこの文字列（会社名など）が含まれていればブロックします。</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">内蔵ルール</th>
+						<td>
+							<label>
+								<input type="checkbox" name="cf7sb_block_uuid" value="1"
+									<?php checked( $list['block_uuid'] ); ?> <?php disabled( ! $can_edit ); ?>>
+								UUID形式の管理番号をブロックする（推奨・全サイト共通）
+							</label>
+							<p class="description">「管理番号: 08ffb4e6-9d35-4f9e-b173-…」のような <code>8桁-4桁-4桁-4桁-12桁</code> の英数字IDが本文などに含まれる送信を拒否します。この形式のIDが正当な問い合わせに現れることはまずありません。</p>
 						</td>
 					</tr>
 					<tr>
@@ -683,6 +697,32 @@ class CF7SB_Admin {
 			var codeCopy = document.getElementById( 'cf7sb_code_copy' );
 			if ( codeOut && codeCopy ) {
 				codeCopy.addEventListener( 'click', function () { copyValue( codeOut, codeCopy ); } );
+			}
+
+			// ブロック設定: 変更がない間は保存ボタンを押せなくする
+			var blForm = document.getElementById( 'cf7sb_blocklist_form' );
+			if ( blForm ) {
+				var saveBtn = blForm.querySelector( 'input[type="submit"], button[type="submit"]' );
+				if ( saveBtn ) {
+					var snapshot = function () {
+						var parts = [];
+						blForm.querySelectorAll( 'input, textarea' ).forEach( function ( el ) {
+							if ( 'hidden' === el.type || 'submit' === el.type ) {
+								return;
+							}
+							parts.push( el.name + '=' + ( 'checkbox' === el.type ? el.checked : el.value ) );
+						} );
+						return parts.join( '\n' );
+					};
+					var baseline = snapshot();
+					var pending  = '1' === blForm.getAttribute( 'data-pending' ); // 未保存の復元入力があるときは最初から押せる
+					var update = function () {
+						saveBtn.disabled = ! pending && snapshot() === baseline;
+					};
+					blForm.addEventListener( 'input', update );
+					blForm.addEventListener( 'change', update );
+					update();
+				}
 			}
 		} )();
 		</script>
