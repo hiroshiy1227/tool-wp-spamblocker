@@ -207,6 +207,13 @@ class CF7SB_Admin {
 			self::redirect_back( 'deploy_failed', 'setup' );
 		}
 
+		// PHPのOPcacheに古いコンパイル結果が残っていると、ファイルを差し替えても
+		// 旧バージョンが実行され続けることがあるため、明示的に破棄する
+		if ( function_exists( 'opcache_invalidate' ) ) {
+			@opcache_invalidate( $target, true );
+		}
+		clearstatcache( true, $target );
+
 		// 書き込んだ場所が実際に公開URLで配信されているか検証する。
 		// サーバー構成によっては DOCUMENT_ROOT と公開ディレクトリが一致せず、
 		// 「書き込みは成功したのに古いファイルが配信され続ける」ことがあるため。
