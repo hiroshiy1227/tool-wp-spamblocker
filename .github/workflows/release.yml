@@ -1,0 +1,40 @@
+name: Release
+
+# タグ（v1.2.3 形式）をpushすると、zipをビルドしてGitHub Releaseを自動作成する。
+# 各サイトのプラグインはReleases APIを見ているので、これだけで更新通知が届く。
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: タグとプラグインのバージョン一致を確認
+        run: |
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          HEADER_VER=$(grep -m1 "Version:" cf7-spam-blocker/cf7-spam-blocker.php | sed 's/.*Version:[[:space:]]*//' | tr -d ' \r')
+          CONST_VER=$(grep -m1 "CF7SB_VERSION" cf7-spam-blocker/cf7-spam-blocker.php | sed "s/.*'\([0-9.]*\)'.*/\1/")
+          echo "tag=$TAG_VER header=$HEADER_VER const=$CONST_VER"
+          if [ "$TAG_VER" != "$HEADER_VER" ] || [ "$TAG_VER" != "$CONST_VER" ]; then
+            echo "::error::タグ(v$TAG_VER)とプラグインのVersionヘッダー($HEADER_VER)/CF7SB_VERSION($CONST_VER)が一致しません。cf7-spam-blocker.php を修正してからタグを打ち直してください。"
+            exit 1
+          fi
+
+      - name: zipビルド
+        run: ./build.sh
+
+      - name: Release作成
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/cf7-spam-blocker-${GITHUB_REF_NAME#v}.zip" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
