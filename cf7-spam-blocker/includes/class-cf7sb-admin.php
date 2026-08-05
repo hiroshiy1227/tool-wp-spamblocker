@@ -16,6 +16,7 @@ class CF7SB_Admin {
 		add_action( 'admin_post_cf7sb_save_settings', array( __CLASS__, 'handle_save_settings' ) );
 		add_action( 'admin_post_cf7sb_save_blocklist', array( __CLASS__, 'handle_save_blocklist' ) );
 		add_action( 'admin_post_cf7sb_refresh', array( __CLASS__, 'handle_refresh' ) );
+		add_action( 'admin_post_cf7sb_download_server', array( __CLASS__, 'handle_download_server' ) );
 		add_action( 'admin_notices', array( __CLASS__, 'notices' ) );
 	}
 
@@ -47,6 +48,18 @@ class CF7SB_Admin {
 		$settings['message'] = sanitize_text_field( isset( $_POST['cf7sb_message'] ) ? wp_unslash( $_POST['cf7sb_message'] ) : '' );
 		if ( '' === $settings['message'] ) {
 			$settings['message'] = '送信できない内容が含まれています。';
+		}
+
+		// セットアップコードが貼り付けられていれば、URL・キーをコードから一括設定
+		$code = sanitize_text_field( isset( $_POST['cf7sb_setup_code'] ) ? wp_unslash( $_POST['cf7sb_setup_code'] ) : '' );
+		if ( '' !== $code ) {
+			$decoded = self::decode_setup_code( $code );
+			if ( null === $decoded ) {
+				set_transient( 'cf7sb_last_error_' . get_current_user_id(), 'セットアップコードの形式が正しくありません。', MINUTE_IN_SECONDS );
+				self::redirect_back( 'code_invalid' );
+			}
+			$settings['url'] = $decoded['url'];
+			$settings['key'] = $decoded['key'];
 		}
 
 		update_option( CF7SB_Blocklist::OPTION_SETTINGS, $settings, false );
@@ -92,6 +105,72 @@ class CF7SB_Admin {
 		self::redirect_back( 'refreshed' );
 	}
 
+	/**
+	 * サーバー設置用の blocklist-api.php を、秘密キーを埋め込んだ状態でダウンロードさせる。
+	 * このサイトの秘密キーが未設定なら自動生成して設定にも保存する（再ダウンロードしても同じキー）。
+	 */
+	public static function handle_download_server() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( '権限がありません。' );
+		}
+		check_admin_referer( 'cf7sb_download_server' );
+
+		$settings = CF7SB_Blocklist::get_settings();
+		if ( '' === $settings['key'] ) {
+			$settings['key'] = 'cf7sb-' . bin2hex( random_bytes( 20 ) );
+			update_option( CF7SB_Blocklist::OPTION_SETTINGS, $settings, false );
+		}
+
+		$template = file_get_contents( CF7SB_DIR . 'server/blocklist-api.tpl' );
+		if ( false === $template ) {
+			wp_die( 'テンプレートファイルが見つかりません。プラグインを再インストールしてください。' );
+		}
+
+		$file = preg_replace(
+			"/const CF7SB_API_KEY = '[^']*';/",
+			"const CF7SB_API_KEY = '" . $settings['key'] . "';",
+			$template,
+			1
+		);
+
+		nocache_headers();
+		header( 'Content-Type: application/octet-stream' );
+		header( 'Content-Disposition: attachment; filename="blocklist-api.php"' );
+		header( 'Content-Length: ' . strlen( $file ) );
+		echo $file; // phpcs:ignore WordPress.Security.EscapeOutput
+		exit;
+	}
+
+	/**
+	 * セットアップコード（URL＋キーをまとめた文字列）の生成と復元。
+	 * 形式: CF7SB1:<base64({"url":"...","key":"..."})>
+	 */
+	public static function encode_setup_code( $url, $key ) {
+		return 'CF7SB1:' . base64_encode( wp_json_encode( array( 'url' => $url, 'key' => $key ) ) );
+	}
+
+	private static function decode_setup_code( $code ) {
+		if ( 0 !== strpos( $code, 'CF7SB1:' ) ) {
+			return null;
+		}
+		$json = base64_decode( substr( $code, 7 ), true );
+		if ( false === $json ) {
+			return null;
+		}
+		$data = json_decode( $json, true );
+		if ( ! is_array( $data ) || empty( $data['url'] ) || ! isset( $data['key'] ) ) {
+			return null;
+		}
+		$url = esc_url_raw( $data['url'] );
+		if ( '' === $url ) {
+			return null;
+		}
+		return array(
+			'url' => $url,
+			'key' => sanitize_text_field( $data['key'] ),
+		);
+	}
+
 	private static function textarea_to_array( $text ) {
 		return CF7SB_Blocklist::sanitize_lines( preg_split( '/\r\n|\r|\n/', (string) $text ) );
 	}
@@ -110,6 +189,7 @@ class CF7SB_Admin {
 			'blocklist_saved' => array( 'success', 'ブロックリストを中央サーバーに保存しました。同じリストを参照する全サイトに反映されます（各サイトの次回取得時）。' ),
 			'refreshed'       => array( 'success', 'ブロックリストを再取得しました。' ),
 			'push_failed'     => array( 'error', 'ブロックリストの保存に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
+			'code_invalid'    => array( 'error', 'セットアップコードを読み取れませんでした。コピー元のサイトで表示されたコードを、そのまま全部貼り付けてください。' ),
 			'refresh_failed'  => array( 'error', 'ブロックリストの取得に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
 		);
 
@@ -142,6 +222,39 @@ class CF7SB_Admin {
 		<div class="wrap">
 			<h1>CF7 Spam Blocker</h1>
 
+			<details style="margin:1em 0; padding:0.2em 1.2em; background:#fff; border:1px solid #c3c4c7; border-radius:4px; max-width:800px;" <?php echo ( '' === $settings['url'] ) ? 'open' : ''; ?>>
+				<summary style="cursor:pointer; font-weight:600; font-size:1.05em; padding:0.6em 0;">初期セットアップガイド</summary>
+				<ol style="margin-top:0;">
+					<li style="margin-bottom:1em;">
+						<strong>サーバー設置ファイルをダウンロード</strong><br>
+						ブロックリストを保管する <code>blocklist-api.php</code> を、秘密キー設定済みの状態でダウンロードします（ファイルの編集は不要です）。
+						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0.5em 0;">
+							<?php wp_nonce_field( 'cf7sb_download_server' ); ?>
+							<input type="hidden" name="action" value="cf7sb_download_server">
+							<button type="submit" class="button button-primary">サーバー設置ファイルをダウンロード</button>
+						</form>
+						<p class="description">このサイトの「書き込み用秘密キー」が未設定の場合は、安全なキーを自動生成して下の設定欄にも保存します（画面を再読み込みすると表示されます）。</p>
+					</li>
+					<li style="margin-bottom:1em;">
+						<strong>サーバーにアップロード</strong><br>
+						FTPなどで、管理しているサーバーの任意の場所に設置します（例: <code>https://example.com/cf7sb/blocklist-api.php</code>）。設置は全サイト共通で<strong>1回だけ</strong>です。
+					</li>
+					<li style="margin-bottom:1em;">
+						<strong>接続設定を保存</strong><br>
+						設置先のURLを下の「ブロックリストURL」に入力して「接続設定を保存」。保存後に「最終取得」の日時が表示されれば接続成功です。<code>?list=会社A</code> のようにリスト名を付けると、用途別に別のリストを共有できます。
+					</li>
+					<li style="margin-bottom:1em;">
+						<strong>ブロック条件を登録</strong><br>
+						下の「ブロックリスト」で拒否ドメイン・拒否文字列を1行1件で入力して保存します。
+					</li>
+					<li style="margin-bottom:1em;">
+						<strong>2サイト目以降</strong><br>
+						ファイル設置は不要です。設定済みサイトの「セットアップコード」をコピーし、新しいサイトの同じ欄に貼り付けて保存するだけで、URLと秘密キーが一括設定され同じリストが共有されます。
+					</li>
+				</ol>
+				<p style="margin-bottom:1em;">動作確認: Contact Form 7 のフォームのメール欄に拒否ドメインのアドレスを入力して送信し、「<?php echo esc_html( $settings['message'] ); ?>」と表示されればOKです。</p>
+			</details>
+
 			<h2>接続設定</h2>
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 				<?php wp_nonce_field( 'cf7sb_save_settings' ); ?>
@@ -161,7 +274,24 @@ class CF7SB_Admin {
 						<td>
 							<input type="password" id="cf7sb_key" name="cf7sb_key" class="regular-text"
 								value="<?php echo esc_attr( $settings['key'] ); ?>" autocomplete="new-password">
+							<button type="button" class="button" id="cf7sb_key_toggle">表示</button>
+							<button type="button" class="button" id="cf7sb_key_copy">コピー</button>
 							<p class="description">blocklist-api.php に設定したキー。空の場合、このサイトからは閲覧のみ（編集不可）になります。</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="cf7sb_setup_code">セットアップコード</label></th>
+						<td>
+							<?php if ( '' !== $settings['url'] ) : ?>
+								<input type="text" readonly id="cf7sb_setup_code_out" class="large-text code"
+									value="<?php echo esc_attr( self::encode_setup_code( $settings['url'], $settings['key'] ) ); ?>"
+									onclick="this.select();">
+								<button type="button" class="button" id="cf7sb_code_copy" style="margin-top:4px;">このサイトの設定をコピー</button>
+								<p class="description">2サイト目以降では、このコードを新しいサイトの「セットアップコード」欄に貼り付けて保存するだけで、URLと秘密キーが一括設定されます。</p>
+							<?php endif; ?>
+							<input type="text" id="cf7sb_setup_code" name="cf7sb_setup_code" class="large-text code"
+								placeholder="別のサイトでコピーしたコードをここに貼り付けて「接続設定を保存」" autocomplete="off"
+								<?php echo ( '' !== $settings['url'] ) ? 'style="margin-top:8px;"' : ''; ?>>
 						</td>
 					</tr>
 					<tr>
@@ -205,7 +335,7 @@ class CF7SB_Admin {
 						<td>
 							<textarea id="cf7sb_domains" name="cf7sb_domains" rows="8" class="large-text code"
 								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( implode( "\n", $list['domains'] ) ); ?></textarea>
-							<p class="description">メール欄はサブドメイン含む完全一致、本文・テキスト欄は文字列として含まれていればブロックします。例: <code>saleslist-x.com</code></p>
+							<p class="description">メール欄はサブドメイン含む完全一致、本文・テキスト欄は文字列として含まれていればブロックします。例: <code>spam.com</code></p>
 						</td>
 					</tr>
 					<tr>
@@ -222,6 +352,44 @@ class CF7SB_Admin {
 				<?php endif; ?>
 			</form>
 		</div>
+		<script>
+		( function () {
+			function copyValue( input, button ) {
+				input.focus();
+				input.select();
+				var done = function () {
+					var label = button.textContent;
+					button.textContent = 'コピーしました ✓';
+					setTimeout( function () { button.textContent = label; }, 1500 );
+				};
+				if ( navigator.clipboard && navigator.clipboard.writeText ) {
+					navigator.clipboard.writeText( input.value ).then( done );
+				} else {
+					document.execCommand( 'copy' );
+					done();
+				}
+			}
+
+			var key = document.getElementById( 'cf7sb_key' );
+			var toggle = document.getElementById( 'cf7sb_key_toggle' );
+			if ( key && toggle ) {
+				toggle.addEventListener( 'click', function () {
+					var hidden = ( 'password' === key.type );
+					key.type = hidden ? 'text' : 'password';
+					toggle.textContent = hidden ? '隠す' : '表示';
+				} );
+			}
+			var keyCopy = document.getElementById( 'cf7sb_key_copy' );
+			if ( key && keyCopy ) {
+				keyCopy.addEventListener( 'click', function () { copyValue( key, keyCopy ); } );
+			}
+			var codeOut = document.getElementById( 'cf7sb_setup_code_out' );
+			var codeCopy = document.getElementById( 'cf7sb_code_copy' );
+			if ( codeOut && codeCopy ) {
+				codeCopy.addEventListener( 'click', function () { copyValue( codeOut, codeCopy ); } );
+			}
+		} )();
+		</script>
 		<?php
 	}
 }

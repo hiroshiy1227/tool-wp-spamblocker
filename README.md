@@ -6,7 +6,7 @@ Contact Form 7 用の迷惑メールブロッカー。拒否ドメイン・拒�
 
 ```
 cf7-spam-blocker/        ← プラグイン本体（各サイトにインストール）
-server/blocklist-api.php ← ブロックリスト配信・受付API（自分のサーバー1箇所に設置）
+  server/blocklist-api.tpl ← サーバー設置ファイルの雛形（設定画面からキー埋め込み済みでダウンロード可能）
 .github/workflows/release.yml ← タグpushでzipビルド＆Release自動作成
 build.sh                 ← 手動インストール用zip作成スクリプト
 ```
@@ -25,24 +25,23 @@ build.sh                 ← 手動インストール用zip作成スクリプト
 1. GitHubの **パブリック** リポジトリ [hiroshiy1227/tool-wpplugin-spamblocker](https://github.com/hiroshiy1227/tool-wpplugin-spamblocker) にこのディレクトリをpush
 2. リポジトリを移動・改名した場合は、`cf7-spam-blocker/cf7-spam-blocker.php` ヘッダーの `Update URI:` を新しいリポジトリURLに合わせる
 
-### 2. ブロックリスト中央サーバー（1箇所だけ）
+### 2. 1サイト目のインストールと中央サーバー設置
 
-1. `server/blocklist-api.php` を自分のサーバーに設置（例: `https://example.com/cf7sb/blocklist-api.php`）
-2. ファイル内の `CF7SB_API_KEY` を長いランダム文字列に変更
-
-   ```bash
-   openssl rand -hex 32
-   ```
+1. [最新Releaseのzip](https://github.com/hiroshiy1227/tool-wpplugin-spamblocker/releases/latest) を「プラグイン → 新規追加 → プラグインのアップロード」からインストール・有効化（初回のみ手動。以降はGitHub経由で更新）
+2. 「設定 → CF7 Spam Blocker」の**初期セットアップガイド**に従う
+   1. 「サーバー設置ファイルをダウンロード」→ 秘密キー埋め込み済みの `blocklist-api.php` が保存される（キーは自動生成され、このサイトの設定にも保存される）
+   2. そのファイルをFTP等で自分のサーバーの任意の場所へアップロード（例: `https://example.com/cf7sb/blocklist-api.php`。全サイト共通で1回だけ）
+   3. 設置先URLを「ブロックリストURL」に入力して保存 →「最終取得」が表示されれば接続成功
+   4. 拒否ドメイン・拒否文字列を登録
 
 ※ ブロックリストは書き込みAPIと秘密キーが必要なため、GitHubではなく自分のサーバーに置きます（リポジトリには含まれません）。
 
-### 3. 各サイトへのインストール
+### 3. 2サイト目以降のインストール
 
-1. `./build.sh` でzip化し、各サイトの「プラグイン → 新規追加 → プラグインのアップロード」からインストール・有効化（初回のみ手動。以降はGitHub経由で更新）
-2. 各サイトの「設定 → CF7 Spam Blocker」で以下を設定
-   - **ブロックリストURL**: `https://example.com/cf7sb/blocklist-api.php?list=default`
-     - `?list=会社A` のようにリスト名を変えると、用途別（会社A用・会社B用・個人用など）に別リストを共有できます
-   - **書き込み用秘密キー**: `blocklist-api.php` に設定したキー（編集させたいサイトのみ。空なら閲覧・自動取得のみ）
+サーバー設置は不要です。zipをインストールし、「設定 → CF7 Spam Blocker」で**同じURLと秘密キー**を設定するだけです。
+
+- `?list=会社A` のようにリスト名を変えると、用途別（会社A用・会社B用・個人用など）に別リストを共有できます
+- 秘密キーを空にすると、そのサイトは閲覧・自動取得のみ（編集不可）になります
 
 ## リストの編集
 
