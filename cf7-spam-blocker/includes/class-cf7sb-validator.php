@@ -46,7 +46,7 @@ class CF7SB_Validator {
 		}
 
 		if ( self::$blocked ) {
-			$message = CF7SB_Blocklist::get_setting( 'message' );
+			$message = CF7SB_Blocklist::get_message();
 
 			$response['status']        = 'spam';
 			$response['cf7sb_blocked'] = true;
@@ -230,7 +230,7 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 	 */
 	public static function filter_display_message( $message, $status = '' ) {
 		if ( self::$blocked && 'spam' === $status ) {
-			$custom = CF7SB_Blocklist::get_setting( 'message' );
+			$custom = CF7SB_Blocklist::get_message();
 			if ( '' !== $custom ) {
 				return $custom;
 			}

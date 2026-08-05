@@ -31,8 +31,12 @@ class CF7SB_Admin {
 		);
 	}
 
-	private static function redirect_back( $notice ) {
-		wp_safe_redirect( add_query_arg( 'cf7sb_notice', $notice, admin_url( 'options-general.php?page=cf7sb' ) ) );
+	private static function redirect_back( $notice, $tab = '' ) {
+		$url = admin_url( 'options-general.php?page=cf7sb' );
+		if ( $tab ) {
+			$url = add_query_arg( 'tab', $tab, $url );
+		}
+		wp_safe_redirect( add_query_arg( 'cf7sb_notice', $notice, $url ) );
 		exit;
 	}
 
@@ -46,10 +50,8 @@ class CF7SB_Admin {
 
 		$settings['url']     = esc_url_raw( isset( $_POST['cf7sb_url'] ) ? trim( wp_unslash( $_POST['cf7sb_url'] ) ) : '' );
 		$settings['key']     = sanitize_text_field( isset( $_POST['cf7sb_key'] ) ? wp_unslash( $_POST['cf7sb_key'] ) : '' );
-		$settings['message'] = sanitize_text_field( isset( $_POST['cf7sb_message'] ) ? wp_unslash( $_POST['cf7sb_message'] ) : '' );
-		if ( '' === $settings['message'] ) {
-			$settings['message'] = '迷惑行為と判定されたため送信を拒否しました。';
-		}
+		// メッセージは v1.8.0 から中央リスト側の共通設定になったため、ここでは扱わない
+		// （settings['message'] は中央未設定時のフォールバックとして保持）
 
 		// セットアップコードが貼り付けられていれば、URL・キーをコードから一括設定
 		$code = sanitize_text_field( isset( $_POST['cf7sb_setup_code'] ) ? wp_unslash( $_POST['cf7sb_setup_code'] ) : '' );
@@ -57,7 +59,7 @@ class CF7SB_Admin {
 			$decoded = self::decode_setup_code( $code );
 			if ( null === $decoded ) {
 				set_transient( 'cf7sb_last_error_' . get_current_user_id(), 'セットアップコードの形式が正しくありません。', MINUTE_IN_SECONDS );
-				self::redirect_back( 'code_invalid' );
+				self::redirect_back( 'code_invalid', 'connection' );
 			}
 			$settings['url'] = $decoded['url'];
 			$settings['key'] = $decoded['key'];
@@ -70,7 +72,7 @@ class CF7SB_Admin {
 			CF7SB_Blocklist::refresh();
 		}
 
-		self::redirect_back( 'settings_saved' );
+		self::redirect_back( 'settings_saved', 'connection' );
 	}
 
 	public static function handle_save_blocklist() {
@@ -82,25 +84,30 @@ class CF7SB_Admin {
 		$domains_text  = isset( $_POST['cf7sb_domains'] ) ? (string) wp_unslash( $_POST['cf7sb_domains'] ) : '';
 		$emails_text   = isset( $_POST['cf7sb_emails'] ) ? (string) wp_unslash( $_POST['cf7sb_emails'] ) : '';
 		$keywords_text = isset( $_POST['cf7sb_keywords'] ) ? (string) wp_unslash( $_POST['cf7sb_keywords'] ) : '';
+		$message_text  = isset( $_POST['cf7sb_block_message'] ) ? sanitize_text_field( wp_unslash( $_POST['cf7sb_block_message'] ) ) : '';
+		if ( '' === $message_text ) {
+			$message_text = '迷惑行為と判定されたため送信を拒否しました。';
+		}
 
 		$pushed = CF7SB_Blocklist::push(
 			self::textarea_to_array( $domains_text ),
 			self::textarea_to_array( $keywords_text ),
-			self::textarea_to_array( $emails_text )
+			self::textarea_to_array( $emails_text ),
+			$message_text
 		);
 		if ( is_wp_error( $pushed ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $pushed->get_error_message(), MINUTE_IN_SECONDS );
 			// 入力内容を消さないよう保持して、再表示時にフォームへ戻す
 			set_transient(
 				'cf7sb_pending_input_' . get_current_user_id(),
-				array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text ),
+				array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'message' => $message_text ),
 				10 * MINUTE_IN_SECONDS
 			);
-			self::redirect_back( 'push_failed' );
+			self::redirect_back( 'push_failed', 'blocklist' );
 		}
 
 		delete_transient( 'cf7sb_pending_input_' . get_current_user_id() );
-		self::redirect_back( 'blocklist_saved' );
+		self::redirect_back( 'blocklist_saved', 'blocklist' );
 	}
 
 	public static function handle_refresh() {
@@ -112,10 +119,10 @@ class CF7SB_Admin {
 		$refreshed = CF7SB_Blocklist::refresh();
 		if ( is_wp_error( $refreshed ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $refreshed->get_error_message(), MINUTE_IN_SECONDS );
-			self::redirect_back( 'refresh_failed' );
+			self::redirect_back( 'refresh_failed', 'blocklist' );
 		}
 
-		self::redirect_back( 'refreshed' );
+		self::redirect_back( 'refreshed', 'blocklist' );
 	}
 
 	/**
@@ -168,7 +175,7 @@ class CF7SB_Admin {
 		$target = CF7SB_Blocklist::local_api_target();
 		if ( ! $target ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), 'ブロックリストURLがこのサイトと同じサーバーを指していないため、自動設置できません。', MINUTE_IN_SECONDS );
-			self::redirect_back( 'deploy_failed' );
+			self::redirect_back( 'deploy_failed', 'setup' );
 		}
 
 		$settings = CF7SB_Blocklist::get_settings();
@@ -180,7 +187,7 @@ class CF7SB_Admin {
 		$template = file_get_contents( CF7SB_DIR . 'server/blocklist-api.tpl' );
 		if ( false === $template ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), 'テンプレートファイルが見つかりません。プラグインを再インストールしてください。', MINUTE_IN_SECONDS );
-			self::redirect_back( 'deploy_failed' );
+			self::redirect_back( 'deploy_failed', 'setup' );
 		}
 
 		$file = preg_replace(
@@ -193,11 +200,11 @@ class CF7SB_Admin {
 		$dir = dirname( $target );
 		if ( ! is_dir( $dir ) && ! mkdir( $dir, 0755, true ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), '設置先ディレクトリを作成できませんでした（書き込み権限を確認してください）。', MINUTE_IN_SECONDS );
-			self::redirect_back( 'deploy_failed' );
+			self::redirect_back( 'deploy_failed', 'setup' );
 		}
 		if ( false === file_put_contents( $target, $file, LOCK_EX ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), 'ファイルを書き込めませんでした（書き込み権限を確認してください）。', MINUTE_IN_SECONDS );
-			self::redirect_back( 'deploy_failed' );
+			self::redirect_back( 'deploy_failed', 'setup' );
 		}
 
 		// 書き込んだ場所が実際に公開URLで配信されているか検証する。
@@ -219,11 +226,11 @@ class CF7SB_Admin {
 				'書き込み先: ' . $target . ' ／ URLからの応答: ' . $detail,
 				5 * MINUTE_IN_SECONDS
 			);
-			self::redirect_back( 'deploy_unverified' );
+			self::redirect_back( 'deploy_unverified', 'setup' );
 		}
 
 		CF7SB_Blocklist::refresh();
-		self::redirect_back( 'server_deployed' );
+		self::redirect_back( 'server_deployed', 'setup' );
 	}
 
 	/**
@@ -319,18 +326,33 @@ class CF7SB_Admin {
 		$domains_text  = implode( "\n", $list['domains'] );
 		$emails_text   = implode( "\n", $list['emails'] );
 		$keywords_text = implode( "\n", $list['keywords'] );
+		$message_text  = CF7SB_Blocklist::get_message();
 		if ( $has_pending ) {
 			delete_transient( 'cf7sb_pending_input_' . get_current_user_id() );
 			$domains_text  = isset( $pending['domains'] ) ? $pending['domains'] : $domains_text;
 			$emails_text   = isset( $pending['emails'] ) ? $pending['emails'] : $emails_text;
 			$keywords_text = isset( $pending['keywords'] ) ? $pending['keywords'] : $keywords_text;
+			$message_text  = isset( $pending['message'] ) ? $pending['message'] : $message_text;
 		}
+
+		// 表示するタブ（未指定時は、未設定サイトならセットアップ、設定済みならブロック設定）
+		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
+		if ( ! in_array( $tab, array( 'setup', 'connection', 'blocklist' ), true ) ) {
+			$tab = ( '' === $settings['url'] ) ? 'setup' : 'blocklist';
+		}
+		$base_url = admin_url( 'options-general.php?page=cf7sb' );
 		?>
 		<div class="wrap">
 			<h1>CF7 Spam Blocker</h1>
 
-			<details style="margin:1em 0; padding:0.2em 1.2em; background:#fff; border:1px solid #c3c4c7; border-radius:4px; max-width:800px;" <?php echo ( '' === $settings['url'] ) ? 'open' : ''; ?>>
-				<summary style="cursor:pointer; font-weight:600; font-size:1.05em; padding:0.6em 0;">初期セットアップガイド</summary>
+			<h2 class="nav-tab-wrapper" style="margin-bottom:1.2em;">
+				<a href="<?php echo esc_url( add_query_arg( 'tab', 'setup', $base_url ) ); ?>" class="nav-tab <?php echo 'setup' === $tab ? 'nav-tab-active' : ''; ?>">初期セットアップ</a>
+				<a href="<?php echo esc_url( add_query_arg( 'tab', 'connection', $base_url ) ); ?>" class="nav-tab <?php echo 'connection' === $tab ? 'nav-tab-active' : ''; ?>">接続設定</a>
+				<a href="<?php echo esc_url( add_query_arg( 'tab', 'blocklist', $base_url ) ); ?>" class="nav-tab <?php echo 'blocklist' === $tab ? 'nav-tab-active' : ''; ?>">ブロック設定</a>
+			</h2>
+
+			<?php if ( 'setup' === $tab ) : ?>
+			<div style="padding:0.8em 1.2em; background:#fff; border:1px solid #c3c4c7; border-radius:4px; max-width:800px; margin-bottom:1em;">
 				<ol style="margin-top:0;">
 					<li style="margin-bottom:1em;">
 						<strong>サーバー設置ファイルをダウンロード</strong><br>
@@ -349,21 +371,45 @@ class CF7SB_Admin {
 					</li>
 					<li style="margin-bottom:1em;">
 						<strong>接続設定を保存</strong><br>
-						設置先のURLを下の「ブロックリストURL」に入力して「接続設定を保存」。保存後に「最終取得」の日時が表示されれば接続成功です。<code>?list=会社A</code> のようにリスト名を付けると、用途別に別のリストを共有できます。
+						設置先のURLを「接続設定」タブの「ブロックリストURL」に入力して「接続設定を保存」。保存後に「最終取得」の日時が表示されれば接続成功です。<code>?list=会社A</code> のようにリスト名を付けると、用途別に別のリストを共有できます。
 					</li>
 					<li style="margin-bottom:1em;">
 						<strong>ブロック条件を登録</strong><br>
-						下の「ブロックリスト」で拒否ドメイン・拒否メールアドレス・拒否文字列を1行1件で入力して保存します。
+						「ブロック設定」タブで拒否ドメイン・拒否メールアドレス・拒否文字列を1行1件で入力して保存します。
 					</li>
 					<li style="margin-bottom:1em;">
 						<strong>2サイト目以降</strong><br>
 						ファイル設置は不要です。設定済みサイトの「セットアップコード」をコピーし、新しいサイトの同じ欄に貼り付けて保存するだけで、URLと秘密キーが一括設定され同じリストが共有されます。
 					</li>
 				</ol>
-				<p style="margin-bottom:1em;">動作確認: Contact Form 7 のフォームのメール欄に拒否ドメインのアドレスを入力して送信し、フォーム下部に「<?php echo esc_html( $settings['message'] ); ?>」と表示されればOKです。</p>
-			</details>
+				<p style="margin-bottom:1em;">動作確認: Contact Form 7 のフォームのメール欄に拒否ドメインのアドレスを入力して送信し、「<?php echo esc_html( $message_text ); ?>」と表示されればOKです。</p>
+			</div>
 
-			<h2>接続設定</h2>
+			<?php
+			$local_target = CF7SB_Blocklist::local_api_target();
+			if ( $local_target ) :
+				$target_exists = is_file( $local_target );
+			?>
+				<div style="margin:0 0 1em; padding:0.8em 1.2em; background:#fff; border-left:4px solid #2271b1; box-shadow:0 1px 1px rgba(0,0,0,.04); max-width:800px;">
+					<p style="margin:0 0 0.6em;">
+						<strong>ブロックリストURLはこのサイトと同じサーバーです。</strong>
+						FTPを使わずに、ここからサーバーファイル（blocklist-api.php）を直接<?php echo $target_exists ? '修復・更新' : '設置'; ?>できます。
+					</p>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0;">
+						<?php wp_nonce_field( 'cf7sb_deploy_server' ); ?>
+						<input type="hidden" name="action" value="cf7sb_deploy_server">
+						<button type="submit" class="button button-primary"><?php echo $target_exists ? 'サーバーファイルを修復（キーを同期）' : 'サーバーファイルを自動設置'; ?></button>
+					</form>
+					<p class="description" style="margin:0.6em 0 0;">
+						このサイトの秘密キー（未設定なら自動生成）を埋め込んだ最新のファイルを書き込みます。登録済みのブロックリストのデータはそのまま保持されます。<br>
+						書き込み先: <code><?php echo esc_html( $local_target ); ?></code><br>
+						※この場所が実際に公開されている場所と違う場合は、書き込みに成功してもURL上のファイルは変わりません。実行後に自動で検証し、食い違っていれば警告を表示します。
+					</p>
+				</div>
+			<?php endif; ?>
+			<?php endif; ?>
+
+			<?php if ( 'connection' === $tab ) : ?>
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 				<?php wp_nonce_field( 'cf7sb_save_settings' ); ?>
 				<input type="hidden" name="action" value="cf7sb_save_settings">
@@ -402,44 +448,12 @@ class CF7SB_Admin {
 								<?php echo ( '' !== $settings['url'] ) ? 'style="margin-top:8px;"' : ''; ?>>
 						</td>
 					</tr>
-					<tr>
-						<th scope="row"><label for="cf7sb_message">ブロック時のメッセージ</label></th>
-						<td>
-							<input type="text" id="cf7sb_message" name="cf7sb_message" class="large-text"
-								value="<?php echo esc_attr( $settings['message'] ); ?>">
-							<p class="description">ブロック時は、このメッセージを<strong>フォーム全体の送信結果として1回だけ</strong>表示します。どの入力欄が原因かは表示しないため、送信者に条件を推測されません。</p>
-						</td>
-					</tr>
 				</table>
 				<?php submit_button( '接続設定を保存' ); ?>
 			</form>
-
-			<?php
-			$local_target = CF7SB_Blocklist::local_api_target();
-			if ( $local_target ) :
-				$target_exists = is_file( $local_target );
-			?>
-				<div style="margin:0 0 1em; padding:0.8em 1.2em; background:#fff; border-left:4px solid #2271b1; box-shadow:0 1px 1px rgba(0,0,0,.04); max-width:800px;">
-					<p style="margin:0 0 0.6em;">
-						<strong>ブロックリストURLはこのサイトと同じサーバーです。</strong>
-						FTPを使わずに、ここからサーバーファイル（blocklist-api.php）を直接<?php echo $target_exists ? '修復・更新' : '設置'; ?>できます。
-					</p>
-					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0;">
-						<?php wp_nonce_field( 'cf7sb_deploy_server' ); ?>
-						<input type="hidden" name="action" value="cf7sb_deploy_server">
-						<button type="submit" class="button button-primary"><?php echo $target_exists ? 'サーバーファイルを修復（キーを同期）' : 'サーバーファイルを自動設置'; ?></button>
-					</form>
-					<p class="description" style="margin:0.6em 0 0;">
-						このサイトの秘密キー（未設定なら自動生成）を埋め込んだ最新のファイルを書き込みます。登録済みのブロックリストのデータはそのまま保持されます。<br>
-						書き込み先: <code><?php echo esc_html( $local_target ); ?></code><br>
-						※この場所が実際に公開されている場所と違う場合は、書き込みに成功してもURL上のファイルは変わりません。実行後に自動で検証し、食い違っていれば警告を表示します。
-					</p>
-				</div>
 			<?php endif; ?>
 
-			<hr>
-
-			<h2>ブロックリスト</h2>
+			<?php if ( 'blocklist' === $tab ) : ?>
 			<p>
 				最終取得: <strong><?php echo esc_html( $fetched_at ); ?></strong>
 				（拒否ドメイン <?php echo count( $list['domains'] ); ?> 件 / 拒否メールアドレス <?php echo count( $list['emails'] ); ?> 件 / 拒否文字列 <?php echo count( $list['keywords'] ); ?> 件）
@@ -476,6 +490,14 @@ class CF7SB_Admin {
 				<input type="hidden" name="action" value="cf7sb_save_blocklist">
 				<table class="form-table" role="presentation">
 					<tr>
+						<th scope="row"><label for="cf7sb_block_message">ブロック時のメッセージ（全サイト共通）</label></th>
+						<td>
+							<input type="text" id="cf7sb_block_message" name="cf7sb_block_message" class="large-text"
+								value="<?php echo esc_attr( $message_text ); ?>" <?php disabled( ! $can_edit ); ?>>
+							<p class="description">ブロック時にフォーム全体の送信結果として表示する文言。リストと同じく中央サーバーに保存され、<strong>どのサイトで変更しても全サイトに反映</strong>されます。</p>
+						</td>
+					</tr>
+					<tr>
 						<th scope="row"><label for="cf7sb_domains">拒否ドメイン（1行1件）</label></th>
 						<td>
 							<textarea id="cf7sb_domains" name="cf7sb_domains" rows="8" class="large-text code"
@@ -504,6 +526,7 @@ class CF7SB_Admin {
 					<?php submit_button( 'ブロックリストを保存（全サイトに反映）' ); ?>
 				<?php endif; ?>
 			</form>
+			<?php endif; ?>
 		</div>
 		<script>
 		( function () {

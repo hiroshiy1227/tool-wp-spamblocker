@@ -44,7 +44,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 
 if ( 'GET' === $method ) {
 	if ( ! is_file( $file ) ) {
-		cf7sb_respond( 200, array( 'domains' => array(), 'emails' => array(), 'keywords' => array(), 'updated' => null ) );
+		cf7sb_respond( 200, array( 'domains' => array(), 'emails' => array(), 'keywords' => array(), 'message' => '', 'updated' => null ) );
 	}
 	readfile( $file );
 	exit;
@@ -84,6 +84,15 @@ if ( 'POST' === $method ) {
 			cf7sb_respond( 400, array( 'error' => '件数が上限を超えています。' ) );
 		}
 	}
+	// ブロック時のメッセージ（全サイト共通の文言）
+	$clean['message'] = '';
+	if ( isset( $data['message'] ) && is_string( $data['message'] ) ) {
+		$message = trim( $data['message'] );
+		if ( mb_strlen( $message ) <= 500 ) {
+			$clean['message'] = $message;
+		}
+	}
+
 	$clean['updated'] = date( 'c' );
 
 	if ( ! is_dir( CF7SB_LISTS_DIR ) && ! mkdir( CF7SB_LISTS_DIR, 0755, true ) ) {

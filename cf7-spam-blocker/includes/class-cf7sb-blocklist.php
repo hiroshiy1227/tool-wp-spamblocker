@@ -63,7 +63,20 @@ class CF7SB_Blocklist {
 			'domains'  => isset( $stored['domains'] ) ? (array) $stored['domains'] : array(),
 			'emails'   => isset( $stored['emails'] ) ? (array) $stored['emails'] : array(),
 			'keywords' => isset( $stored['keywords'] ) ? (array) $stored['keywords'] : array(),
+			'message'  => isset( $stored['message'] ) ? (string) $stored['message'] : '',
 		);
+	}
+
+	/**
+	 * ブロック時に表示するメッセージ（全サイト共通）。
+	 * 中央リストに設定があればそれを使い、なければ旧・サイト個別設定→既定文言の順で使う。
+	 */
+	public static function get_message() {
+		$stored = get_option( self::OPTION_LIST, array() );
+		if ( ! empty( $stored['message'] ) ) {
+			return (string) $stored['message'];
+		}
+		return self::get_setting( 'message' );
 	}
 
 	/**
@@ -127,11 +140,12 @@ class CF7SB_Blocklist {
 		return preg_match( '/^[a-zA-Z0-9_-]{1,50}$/', $list ) ? $list : 'default';
 	}
 
-	private static function store_lists( $domains, $keywords, $emails = array() ) {
+	private static function store_lists( $domains, $keywords, $emails = array(), $message = '' ) {
 		$stored               = get_option( self::OPTION_LIST, array() );
 		$stored['domains']    = self::sanitize_lines( $domains );
 		$stored['emails']     = self::sanitize_lines( $emails );
 		$stored['keywords']   = self::sanitize_lines( $keywords );
+		$stored['message']    = trim( wp_strip_all_tags( (string) $message ) );
 		$stored['fetched_at'] = time();
 		$stored['error']      = '';
 		update_option( self::OPTION_LIST, $stored, false );
@@ -170,7 +184,8 @@ class CF7SB_Blocklist {
 			self::store_lists(
 				isset( $data['domains'] ) ? $data['domains'] : array(),
 				isset( $data['keywords'] ) ? $data['keywords'] : array(),
-				isset( $data['emails'] ) ? $data['emails'] : array()
+				isset( $data['emails'] ) ? $data['emails'] : array(),
+				isset( $data['message'] ) ? $data['message'] : ''
 			);
 			return true;
 		}
@@ -197,7 +212,8 @@ class CF7SB_Blocklist {
 		self::store_lists(
 			isset( $data['domains'] ) ? $data['domains'] : array(),
 			isset( $data['keywords'] ) ? $data['keywords'] : array(),
-			isset( $data['emails'] ) ? $data['emails'] : array()
+			isset( $data['emails'] ) ? $data['emails'] : array(),
+			isset( $data['message'] ) ? $data['message'] : ''
 		);
 		return true;
 	}
@@ -209,7 +225,7 @@ class CF7SB_Blocklist {
 	 * @param string[] $keywords
 	 * @return true|WP_Error
 	 */
-	public static function push( $domains, $keywords, $emails = array() ) {
+	public static function push( $domains, $keywords, $emails = array(), $message = '' ) {
 		$url = self::get_setting( 'url' );
 		$key = self::get_setting( 'key' );
 
@@ -223,6 +239,7 @@ class CF7SB_Blocklist {
 		$clean_domains  = self::sanitize_lines( $domains );
 		$clean_keywords = self::sanitize_lines( $keywords );
 		$clean_emails   = self::sanitize_lines( $emails );
+		$clean_message  = trim( wp_strip_all_tags( (string) $message ) );
 
 		// 同一サーバーならファイルを直接書く
 		$local = self::local_api_file();
@@ -241,6 +258,7 @@ class CF7SB_Blocklist {
 				'domains'  => $clean_domains,
 				'emails'   => $clean_emails,
 				'keywords' => $clean_keywords,
+				'message'  => $clean_message,
 				'updated'  => date( 'c' ),
 			);
 			$json = wp_json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT );
@@ -248,7 +266,7 @@ class CF7SB_Blocklist {
 				return new WP_Error( 'cf7sb_push_failed', 'ファイルの書き込みに失敗しました。' );
 			}
 
-			self::store_lists( $clean_domains, $clean_keywords, $clean_emails );
+			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message );
 			return true;
 		}
 
@@ -256,6 +274,7 @@ class CF7SB_Blocklist {
 			'domains'  => $clean_domains,
 			'emails'   => $clean_emails,
 			'keywords' => $clean_keywords,
+			'message'  => $clean_message,
 		) );
 
 		$response = wp_remote_post( $url, array(
@@ -284,10 +303,11 @@ class CF7SB_Blocklist {
 			self::store_lists(
 				$saved['domains'],
 				isset( $saved['keywords'] ) ? $saved['keywords'] : array(),
-				isset( $saved['emails'] ) ? $saved['emails'] : array()
+				isset( $saved['emails'] ) ? $saved['emails'] : array(),
+				isset( $saved['message'] ) ? $saved['message'] : $clean_message
 			);
 		} else {
-			self::store_lists( $clean_domains, $clean_keywords, $clean_emails );
+			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message );
 		}
 		return true;
 	}
