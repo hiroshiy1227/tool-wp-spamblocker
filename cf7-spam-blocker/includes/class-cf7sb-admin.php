@@ -78,15 +78,22 @@ class CF7SB_Admin {
 		}
 		check_admin_referer( 'cf7sb_save_blocklist' );
 
-		$domains  = self::textarea_to_array( isset( $_POST['cf7sb_domains'] ) ? wp_unslash( $_POST['cf7sb_domains'] ) : '' );
-		$keywords = self::textarea_to_array( isset( $_POST['cf7sb_keywords'] ) ? wp_unslash( $_POST['cf7sb_keywords'] ) : '' );
+		$domains_text  = isset( $_POST['cf7sb_domains'] ) ? (string) wp_unslash( $_POST['cf7sb_domains'] ) : '';
+		$keywords_text = isset( $_POST['cf7sb_keywords'] ) ? (string) wp_unslash( $_POST['cf7sb_keywords'] ) : '';
 
-		$pushed = CF7SB_Blocklist::push( $domains, $keywords );
+		$pushed = CF7SB_Blocklist::push( self::textarea_to_array( $domains_text ), self::textarea_to_array( $keywords_text ) );
 		if ( is_wp_error( $pushed ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $pushed->get_error_message(), MINUTE_IN_SECONDS );
+			// 入力内容を消さないよう保持して、再表示時にフォームへ戻す
+			set_transient(
+				'cf7sb_pending_input_' . get_current_user_id(),
+				array( 'domains' => $domains_text, 'keywords' => $keywords_text ),
+				10 * MINUTE_IN_SECONDS
+			);
 			self::redirect_back( 'push_failed' );
 		}
 
+		delete_transient( 'cf7sb_pending_input_' . get_current_user_id() );
 		self::redirect_back( 'blocklist_saved' );
 	}
 
@@ -218,6 +225,16 @@ class CF7SB_Admin {
 			? wp_date( 'Y-m-d H:i:s', $stored['fetched_at'] )
 			: '未取得';
 		$fetch_error = ! empty( $stored['error'] ) ? $stored['error'] : '';
+
+		// 直前の保存が失敗していた場合は、入力していた内容をフォームに復元する
+		$pending       = get_transient( 'cf7sb_pending_input_' . get_current_user_id() );
+		$domains_text  = implode( "\n", $list['domains'] );
+		$keywords_text = implode( "\n", $list['keywords'] );
+		if ( is_array( $pending ) ) {
+			delete_transient( 'cf7sb_pending_input_' . get_current_user_id() );
+			$domains_text  = isset( $pending['domains'] ) ? $pending['domains'] : $domains_text;
+			$keywords_text = isset( $pending['keywords'] ) ? $pending['keywords'] : $keywords_text;
+		}
 		?>
 		<div class="wrap">
 			<h1>CF7 Spam Blocker</h1>
@@ -334,7 +351,7 @@ class CF7SB_Admin {
 						<th scope="row"><label for="cf7sb_domains">拒否ドメイン（1行1件）</label></th>
 						<td>
 							<textarea id="cf7sb_domains" name="cf7sb_domains" rows="8" class="large-text code"
-								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( implode( "\n", $list['domains'] ) ); ?></textarea>
+								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $domains_text ); ?></textarea>
 							<p class="description">メール欄はサブドメイン含む完全一致、本文・テキスト欄は文字列として含まれていればブロックします。例: <code>spam.com</code></p>
 						</td>
 					</tr>
@@ -342,7 +359,7 @@ class CF7SB_Admin {
 						<th scope="row"><label for="cf7sb_keywords">拒否文字列（1行1件）</label></th>
 						<td>
 							<textarea id="cf7sb_keywords" name="cf7sb_keywords" rows="8" class="large-text code"
-								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( implode( "\n", $list['keywords'] ) ); ?></textarea>
+								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $keywords_text ); ?></textarea>
 							<p class="description">本文・テキスト欄にこの文字列（会社名など）が含まれていればブロックします。</p>
 						</td>
 					</tr>

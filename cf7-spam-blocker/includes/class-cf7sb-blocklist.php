@@ -66,6 +66,65 @@ class CF7SB_Blocklist {
 	}
 
 	/**
+	 * APIのURLがこのサイト自身と同じサーバーを指す場合、blocklist-api.php のファイルパスを返す。
+	 * 同一サーバーではHTTPを介さず直接ファイルを読み書きすることで、
+	 * ホスティングのレートリミット（HTTP 429）を回避しつつ高速化する。
+	 *
+	 * @return string|null
+	 */
+	private static function local_api_file() {
+		$url = self::get_setting( 'url' );
+		if ( ! $url ) {
+			return null;
+		}
+		$api  = wp_parse_url( $url );
+		$site = wp_parse_url( home_url() );
+		if ( empty( $api['host'] ) || empty( $site['host'] )
+			|| strtolower( $api['host'] ) !== strtolower( $site['host'] ) ) {
+			return null;
+		}
+		$api_port  = isset( $api['port'] ) ? (int) $api['port'] : null;
+		$site_port = isset( $site['port'] ) ? (int) $site['port'] : null;
+		if ( $api_port !== $site_port ) {
+			return null;
+		}
+		if ( empty( $_SERVER['DOCUMENT_ROOT'] ) || empty( $api['path'] ) ) {
+			return null;
+		}
+		$file = realpath( rtrim( wp_unslash( $_SERVER['DOCUMENT_ROOT'] ), '/' ) . $api['path'] );
+		return ( $file && is_file( $file ) ) ? $file : null;
+	}
+
+	/**
+	 * URLの ?list= からリスト名を取り出す（サーバー側と同じルール）。
+	 */
+	private static function list_name() {
+		$query = wp_parse_url( self::get_setting( 'url' ), PHP_URL_QUERY );
+		$args  = array();
+		if ( $query ) {
+			parse_str( $query, $args );
+		}
+		$list = isset( $args['list'] ) && is_string( $args['list'] ) ? $args['list'] : 'default';
+		return preg_match( '/^[a-zA-Z0-9_-]{1,50}$/', $list ) ? $list : 'default';
+	}
+
+	private static function store_lists( $domains, $keywords ) {
+		$stored               = get_option( self::OPTION_LIST, array() );
+		$stored['domains']    = self::sanitize_lines( $domains );
+		$stored['keywords']   = self::sanitize_lines( $keywords );
+		$stored['fetched_at'] = time();
+		$stored['error']      = '';
+		update_option( self::OPTION_LIST, $stored, false );
+	}
+
+	private static function store_error( $error ) {
+		$stored          = get_option( self::OPTION_LIST, array() );
+		$stored['error'] = $error;
+		update_option( self::OPTION_LIST, $stored, false );
+		return new WP_Error( 'cf7sb_fetch_failed', $error );
+	}
+
+	/**
 	 * 中央サーバーから再取得。失敗時は前回のリストを保持したままエラーだけ記録する。
 	 *
 	 * @return true|WP_Error
@@ -76,33 +135,43 @@ class CF7SB_Blocklist {
 			return new WP_Error( 'cf7sb_no_url', 'ブロックリストURLが設定されていません。' );
 		}
 
-		$response = wp_remote_get( $url, array( 'timeout' => 10 ) );
-		$error    = null;
-
-		if ( is_wp_error( $response ) ) {
-			$error = $response->get_error_message();
-		} elseif ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
-			$error = 'HTTP ' . wp_remote_retrieve_response_code( $response );
-		} else {
-			$data = json_decode( wp_remote_retrieve_body( $response ), true );
-			if ( ! is_array( $data ) ) {
-				$error = 'JSONの解析に失敗しました。';
-			} else {
-				$stored = get_option( self::OPTION_LIST, array() );
-				$stored['domains']    = self::sanitize_lines( isset( $data['domains'] ) ? $data['domains'] : array() );
-				$stored['keywords']   = self::sanitize_lines( isset( $data['keywords'] ) ? $data['keywords'] : array() );
-				$stored['fetched_at'] = time();
-				$stored['error']      = '';
-				update_option( self::OPTION_LIST, $stored, false );
+		// 同一サーバーならファイルを直接読む
+		$local = self::local_api_file();
+		if ( $local ) {
+			$json_file = dirname( $local ) . '/lists/' . self::list_name() . '.json';
+			if ( ! is_file( $json_file ) ) {
+				self::store_lists( array(), array() ); // まだ一度も保存されていないリスト
 				return true;
 			}
+			$data = json_decode( (string) file_get_contents( $json_file ), true );
+			if ( ! is_array( $data ) ) {
+				return self::store_error( 'リストファイルの読み取りに失敗しました。' );
+			}
+			self::store_lists(
+				isset( $data['domains'] ) ? $data['domains'] : array(),
+				isset( $data['keywords'] ) ? $data['keywords'] : array()
+			);
+			return true;
 		}
 
-		$stored          = get_option( self::OPTION_LIST, array() );
-		$stored['error'] = $error;
-		update_option( self::OPTION_LIST, $stored, false );
+		$response = wp_remote_get( $url, array( 'timeout' => 10 ) );
 
-		return new WP_Error( 'cf7sb_fetch_failed', $error );
+		if ( is_wp_error( $response ) ) {
+			return self::store_error( $response->get_error_message() );
+		}
+		if ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
+			return self::store_error( 'HTTP ' . wp_remote_retrieve_response_code( $response ) );
+		}
+		$data = json_decode( wp_remote_retrieve_body( $response ), true );
+		if ( ! is_array( $data ) ) {
+			return self::store_error( 'JSONの解析に失敗しました。' );
+		}
+
+		self::store_lists(
+			isset( $data['domains'] ) ? $data['domains'] : array(),
+			isset( $data['keywords'] ) ? $data['keywords'] : array()
+		);
+		return true;
 	}
 
 	/**
@@ -123,9 +192,39 @@ class CF7SB_Blocklist {
 			return new WP_Error( 'cf7sb_no_key', '書き込み用秘密キーが設定されていないため、編集内容を保存できません。' );
 		}
 
+		$clean_domains  = self::sanitize_lines( $domains );
+		$clean_keywords = self::sanitize_lines( $keywords );
+
+		// 同一サーバーならファイルを直接書く
+		$local = self::local_api_file();
+		if ( $local ) {
+			// サーバーファイル内のキーと照合（HTTP経由と同じ認可チェック）
+			$contents = (string) file_get_contents( $local );
+			if ( ! preg_match( "/const CF7SB_API_KEY = '([^']*)';/", $contents, $m ) || ! hash_equals( $m[1], $key ) ) {
+				return new WP_Error( 'cf7sb_push_failed', '秘密キーが一致しません。' );
+			}
+
+			$dir = dirname( $local ) . '/lists';
+			if ( ! is_dir( $dir ) && ! mkdir( $dir, 0755, true ) ) {
+				return new WP_Error( 'cf7sb_push_failed', '保存先ディレクトリを作成できません。' );
+			}
+			$payload = array(
+				'domains'  => $clean_domains,
+				'keywords' => $clean_keywords,
+				'updated'  => date( 'c' ),
+			);
+			$json = wp_json_encode( $payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT );
+			if ( false === file_put_contents( $dir . '/' . self::list_name() . '.json', $json, LOCK_EX ) ) {
+				return new WP_Error( 'cf7sb_push_failed', 'ファイルの書き込みに失敗しました。' );
+			}
+
+			self::store_lists( $clean_domains, $clean_keywords );
+			return true;
+		}
+
 		$body = wp_json_encode( array(
-			'domains'  => self::sanitize_lines( $domains ),
-			'keywords' => self::sanitize_lines( $keywords ),
+			'domains'  => $clean_domains,
+			'keywords' => $clean_keywords,
 		) );
 
 		$response = wp_remote_post( $url, array(
@@ -148,7 +247,13 @@ class CF7SB_Blocklist {
 			return new WP_Error( 'cf7sb_push_failed', $msg );
 		}
 
-		self::refresh();
+		// サーバーが保存済みデータを返すので、再取得せずそのままキャッシュに反映（リクエスト数削減）
+		$saved = json_decode( wp_remote_retrieve_body( $response ), true );
+		if ( is_array( $saved ) && isset( $saved['domains'] ) ) {
+			self::store_lists( $saved['domains'], isset( $saved['keywords'] ) ? $saved['keywords'] : array() );
+		} else {
+			self::store_lists( $clean_domains, $clean_keywords );
+		}
 		return true;
 	}
 
