@@ -331,7 +331,7 @@ class CF7SB_Admin {
 						ファイル設置は不要です。設定済みサイトの「セットアップコード」をコピーし、新しいサイトの同じ欄に貼り付けて保存するだけで、URLと秘密キーが一括設定され同じリストが共有されます。
 					</li>
 				</ol>
-				<p style="margin-bottom:1em;">動作確認: Contact Form 7 のフォームのメール欄に拒否ドメインのアドレスを入力して送信し、「<?php echo esc_html( $settings['message'] ); ?>」と表示されればOKです。</p>
+				<p style="margin-bottom:1em;">動作確認: Contact Form 7 のフォームのメール欄に拒否ドメインのアドレスを入力して送信し、フォーム下部に「<?php echo esc_html( $settings['message'] ); ?>」と表示されればOKです。</p>
 			</details>
 
 			<h2>接続設定</h2>
@@ -374,10 +374,11 @@ class CF7SB_Admin {
 						</td>
 					</tr>
 					<tr>
-						<th scope="row"><label for="cf7sb_message">ブロック時のエラーメッセージ</label></th>
+						<th scope="row"><label for="cf7sb_message">ブロック時のメッセージ</label></th>
 						<td>
-							<input type="text" id="cf7sb_message" name="cf7sb_message" class="regular-text"
+							<input type="text" id="cf7sb_message" name="cf7sb_message" class="large-text"
 								value="<?php echo esc_attr( $settings['message'] ); ?>">
+							<p class="description">ブロック時は、このメッセージを<strong>フォーム全体の送信結果として1回だけ</strong>表示します。どの入力欄が原因かは表示しないため、送信者に条件を推測されません。</p>
 						</td>
 					</tr>
 				</table>
