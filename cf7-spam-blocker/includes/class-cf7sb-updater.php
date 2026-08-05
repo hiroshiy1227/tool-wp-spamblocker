@@ -27,6 +27,16 @@ class CF7SB_Updater {
 			return;
 		}
 		add_filter( "update_plugins_{$host}", array( __CLASS__, 'check_update' ), 10, 3 );
+
+		// 「ダッシュボード → 更新」ページを開いたときは常に自前キャッシュを破棄し、
+		// 直後に走るWPのプラグイン更新チェック（同フック・priority 10）で最新リリースを取り直す
+		add_action( 'load-update-core.php', array( __CLASS__, 'clear_cache' ), 9 );
+		// プラグイン更新完了後などにWPが更新キャッシュを一括破棄したときも追従する
+		add_action( 'delete_site_transient_update_plugins', array( __CLASS__, 'clear_cache' ) );
+	}
+
+	public static function clear_cache() {
+		delete_site_transient( self::CACHE_KEY );
 	}
 
 	private static function update_uri() {
