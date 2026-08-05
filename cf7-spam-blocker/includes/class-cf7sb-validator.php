@@ -161,7 +161,8 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 	}
 
 	/**
-	 * テキスト/本文欄の値がブロック対象か（拒否ドメイン・拒否メールアドレス・拒否文字列を含む）。
+	 * テキスト/本文欄の値がブロック対象か
+	 * （拒否ドメイン・拒否メールアドレス・拒否文字列を含む／拒否パターンに一致）。
 	 */
 	public static function is_blocked_text_value( $value ) {
 		$value = (string) $value;
@@ -173,6 +174,23 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 
 		foreach ( $needles as $needle ) {
 			if ( false !== stripos( $value, $needle ) ) {
+				return true;
+			}
+		}
+		return self::matches_pattern( $value );
+	}
+
+	/**
+	 * 拒否パターン（正規表現）に一致するか。
+	 */
+	public static function matches_pattern( $value ) {
+		$value = (string) $value;
+		if ( '' === $value ) {
+			return false;
+		}
+		$list = CF7SB_Blocklist::get();
+		foreach ( $list['patterns'] as $pattern ) {
+			if ( 1 === @preg_match( CF7SB_Blocklist::wrap_pattern( $pattern ), $value ) ) {
 				return true;
 			}
 		}
@@ -193,7 +211,7 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 		}
 
 		foreach ( $form->scan_form_tags() as $tag ) {
-			if ( ! in_array( $tag->basetype, array( 'email', 'text', 'textarea' ), true ) ) {
+			if ( ! in_array( $tag->basetype, array( 'email', 'text', 'textarea', 'url', 'tel' ), true ) ) {
 				continue;
 			}
 			$value = isset( $data[ $tag->name ] ) ? $data[ $tag->name ] : '';
@@ -201,7 +219,7 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 				$value = implode( ' ', $value );
 			}
 			if ( 'email' === $tag->basetype ) {
-				if ( self::is_blocked_email_value( $value ) ) {
+				if ( self::is_blocked_email_value( $value ) || self::matches_pattern( $value ) ) {
 					return true;
 				}
 			} elseif ( self::is_blocked_text_value( $value ) ) {

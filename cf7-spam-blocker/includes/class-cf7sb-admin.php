@@ -50,8 +50,13 @@ class CF7SB_Admin {
 
 		$settings = CF7SB_Blocklist::get_settings();
 
-		$settings['url']     = esc_url_raw( isset( $_POST['cf7sb_url'] ) ? trim( wp_unslash( $_POST['cf7sb_url'] ) ) : '' );
-		$settings['key']     = sanitize_text_field( isset( $_POST['cf7sb_key'] ) ? wp_unslash( $_POST['cf7sb_key'] ) : '' );
+		// 誤設定防止: 中央サーバー以外のサイトでは、接続済みならURL・キーの直接編集を受け付けない
+		// （変更はセットアップコードの貼り付けでのみ可能。中央サーバー自身と、未接続サイトの初回入力は許可）
+		$locked = ! CF7SB_Server::is_enabled() && '' !== $settings['url'];
+		if ( ! $locked ) {
+			$settings['url'] = esc_url_raw( isset( $_POST['cf7sb_url'] ) ? trim( wp_unslash( $_POST['cf7sb_url'] ) ) : '' );
+			$settings['key'] = sanitize_text_field( isset( $_POST['cf7sb_key'] ) ? wp_unslash( $_POST['cf7sb_key'] ) : '' );
+		}
 		// メッセージは v1.8.0 から中央リスト側の共通設定になったため、ここでは扱わない
 		// （settings['message'] は中央未設定時のフォールバックとして保持）
 
@@ -86,25 +91,39 @@ class CF7SB_Admin {
 		$domains_text  = isset( $_POST['cf7sb_domains'] ) ? (string) wp_unslash( $_POST['cf7sb_domains'] ) : '';
 		$emails_text   = isset( $_POST['cf7sb_emails'] ) ? (string) wp_unslash( $_POST['cf7sb_emails'] ) : '';
 		$keywords_text = isset( $_POST['cf7sb_keywords'] ) ? (string) wp_unslash( $_POST['cf7sb_keywords'] ) : '';
+		$patterns_text = isset( $_POST['cf7sb_patterns'] ) ? (string) wp_unslash( $_POST['cf7sb_patterns'] ) : '';
 		$message_text  = isset( $_POST['cf7sb_block_message'] ) ? sanitize_text_field( wp_unslash( $_POST['cf7sb_block_message'] ) ) : '';
 		if ( '' === $message_text ) {
 			$message_text = '迷惑行為と判定されたため送信を拒否しました。';
+		}
+
+		$pending = array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'patterns' => $patterns_text, 'message' => $message_text );
+
+		// 正規表現として不正なパターンは保存前に弾いて知らせる（黙って消さない）
+		$invalid_patterns = array();
+		foreach ( preg_split( '/\r\n|\r|\n/', $patterns_text ) as $line ) {
+			$line = trim( $line );
+			if ( '' !== $line && false === @preg_match( CF7SB_Blocklist::wrap_pattern( $line ), '' ) ) {
+				$invalid_patterns[] = $line;
+			}
+		}
+		if ( $invalid_patterns ) {
+			set_transient( 'cf7sb_last_error_' . get_current_user_id(), '正規表現として解釈できない拒否パターンがあります: ' . implode( ' ／ ', $invalid_patterns ), MINUTE_IN_SECONDS );
+			set_transient( 'cf7sb_pending_input_' . get_current_user_id(), $pending, 10 * MINUTE_IN_SECONDS );
+			self::redirect_back( 'push_failed', 'blocklist' );
 		}
 
 		$pushed = CF7SB_Blocklist::push(
 			self::textarea_to_array( $domains_text ),
 			self::textarea_to_array( $keywords_text ),
 			self::textarea_to_array( $emails_text ),
-			$message_text
+			$message_text,
+			preg_split( '/\r\n|\r|\n/', $patterns_text )
 		);
 		if ( is_wp_error( $pushed ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $pushed->get_error_message(), MINUTE_IN_SECONDS );
 			// 入力内容を消さないよう保持して、再表示時にフォームへ戻す
-			set_transient(
-				'cf7sb_pending_input_' . get_current_user_id(),
-				array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'message' => $message_text ),
-				10 * MINUTE_IN_SECONDS
-			);
+			set_transient( 'cf7sb_pending_input_' . get_current_user_id(), $pending, 10 * MINUTE_IN_SECONDS );
 			self::redirect_back( 'push_failed', 'blocklist' );
 		}
 
@@ -360,14 +379,19 @@ class CF7SB_Admin {
 		$domains_text  = implode( "\n", $list['domains'] );
 		$emails_text   = implode( "\n", $list['emails'] );
 		$keywords_text = implode( "\n", $list['keywords'] );
+		$patterns_text = implode( "\n", $list['patterns'] );
 		$message_text  = CF7SB_Blocklist::get_message();
 		if ( $has_pending ) {
 			delete_transient( 'cf7sb_pending_input_' . get_current_user_id() );
 			$domains_text  = isset( $pending['domains'] ) ? $pending['domains'] : $domains_text;
 			$emails_text   = isset( $pending['emails'] ) ? $pending['emails'] : $emails_text;
 			$keywords_text = isset( $pending['keywords'] ) ? $pending['keywords'] : $keywords_text;
+			$patterns_text = isset( $pending['patterns'] ) ? $pending['patterns'] : $patterns_text;
 			$message_text  = isset( $pending['message'] ) ? $pending['message'] : $message_text;
 		}
+
+		// 誤設定防止: 中央サーバー以外のサイトでは、接続済みならURL・キーは閲覧のみ
+		$conn_locked = ! CF7SB_Server::is_enabled() && '' !== $settings['url'];
 
 		// 表示するタブ（未指定時は、未設定サイトならセットアップ、設定済みならブロック設定）
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
@@ -493,18 +517,28 @@ class CF7SB_Admin {
 						<td>
 							<input type="url" id="cf7sb_url" name="cf7sb_url" class="regular-text code"
 								value="<?php echo esc_attr( $settings['url'] ); ?>"
-								placeholder="https://example.com/cf7sb/blocklist-api.php?list=default">
-							<p class="description">中央サーバーの blocklist-api.php のURL。<code>?list=会社A</code> のようにリスト名を変えると、サイトごとに別のリストを共有できます。</p>
+								placeholder="https://example.com/wp-json/cf7sb/v1/list?list=default"
+								<?php echo $conn_locked ? 'readonly style="background:#f0f0f1;"' : ''; ?>>
+							<?php if ( $conn_locked ) : ?>
+								<p class="description">誤設定防止のため閲覧のみです。変更する場合は、中央サーバーのサイトでコピーした<strong>セットアップコードを下に貼り付けて保存</strong>してください。</p>
+							<?php else : ?>
+								<p class="description">中央サーバーの配信URL。<code>?list=会社A</code> のようにリスト名を変えると、サイトごとに別のリストを共有できます。</p>
+							<?php endif; ?>
 						</td>
 					</tr>
 					<tr>
 						<th scope="row"><label for="cf7sb_key">書き込み用秘密キー</label></th>
 						<td>
 							<input type="password" id="cf7sb_key" name="cf7sb_key" class="regular-text"
-								value="<?php echo esc_attr( $settings['key'] ); ?>" autocomplete="new-password">
+								value="<?php echo esc_attr( $settings['key'] ); ?>" autocomplete="new-password"
+								<?php echo $conn_locked ? 'readonly style="background:#f0f0f1;"' : ''; ?>>
 							<button type="button" class="button" id="cf7sb_key_toggle">表示</button>
 							<button type="button" class="button" id="cf7sb_key_copy">コピー</button>
-							<p class="description">blocklist-api.php に設定したキー。空の場合、このサイトからは閲覧のみ（編集不可）になります。</p>
+							<?php if ( $conn_locked ) : ?>
+								<p class="description">誤設定防止のため閲覧のみです（セットアップコードの貼り付けでのみ変更できます）。</p>
+							<?php else : ?>
+								<p class="description">中央サーバーの秘密キー。空の場合、このサイトからは閲覧のみ（編集不可）になります。</p>
+							<?php endif; ?>
 						</td>
 					</tr>
 					<tr>
@@ -530,7 +564,7 @@ class CF7SB_Admin {
 			<?php if ( 'blocklist' === $tab ) : ?>
 			<p>
 				最終取得: <strong><?php echo esc_html( $fetched_at ); ?></strong>
-				（拒否ドメイン <?php echo count( $list['domains'] ); ?> 件 / 拒否メールアドレス <?php echo count( $list['emails'] ); ?> 件 / 拒否文字列 <?php echo count( $list['keywords'] ); ?> 件）
+				（拒否ドメイン <?php echo count( $list['domains'] ); ?> 件 / 拒否メールアドレス <?php echo count( $list['emails'] ); ?> 件 / 拒否文字列 <?php echo count( $list['keywords'] ); ?> 件 / 拒否パターン <?php echo count( $list['patterns'] ); ?> 件）
 				<?php if ( $fetch_error ) : ?>
 					<span style="color:#b32d2e;">取得エラー: <?php echo esc_html( $fetch_error ); ?>（前回取得分で動作中）</span>
 				<?php endif; ?>
@@ -593,6 +627,18 @@ class CF7SB_Admin {
 							<textarea id="cf7sb_keywords" name="cf7sb_keywords" rows="8" class="large-text code"
 								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $keywords_text ); ?></textarea>
 							<p class="description">本文・テキスト欄にこの文字列（会社名など）が含まれていればブロックします。</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="cf7sb_patterns">拒否パターン（正規表現・1行1件）</label></th>
+						<td>
+							<textarea id="cf7sb_patterns" name="cf7sb_patterns" rows="6" class="large-text code"
+								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $patterns_text ); ?></textarea>
+							<p class="description">
+								すべての入力欄（メール・電話・URL含む）に対して正規表現で判定します。デリミタ（<code>/～/</code>）は不要、大文字小文字は区別しません。<br>
+								例1（UUID形式の管理番号）: <code>\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b</code><br>
+								例2（スペースを挟んだドメイン偽装）: <code>spam\s*\.\s*co\s*\.\s*jp</code>
+							</p>
 						</td>
 					</tr>
 				</table>

@@ -44,7 +44,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 
 if ( 'GET' === $method ) {
 	if ( ! is_file( $file ) ) {
-		cf7sb_respond( 200, array( 'domains' => array(), 'emails' => array(), 'keywords' => array(), 'message' => '', 'updated' => null ) );
+		cf7sb_respond( 200, array( 'domains' => array(), 'emails' => array(), 'keywords' => array(), 'patterns' => array(), 'message' => '', 'updated' => null ) );
 	}
 	readfile( $file );
 	exit;
@@ -66,15 +66,15 @@ if ( 'POST' === $method ) {
 		cf7sb_respond( 400, array( 'error' => 'JSONの解析に失敗しました。' ) );
 	}
 
-	$clean = array( 'domains' => array(), 'emails' => array(), 'keywords' => array() );
-	foreach ( array( 'domains', 'emails', 'keywords' ) as $field ) {
+	$clean = array( 'domains' => array(), 'emails' => array(), 'keywords' => array(), 'patterns' => array() );
+	foreach ( array( 'domains', 'emails', 'keywords', 'patterns' ) as $field ) {
 		$items = isset( $data[ $field ] ) && is_array( $data[ $field ] ) ? $data[ $field ] : array();
 		foreach ( $items as $item ) {
 			if ( ! is_string( $item ) ) {
 				continue;
 			}
 			$item = trim( $item );
-			if ( '' === $item || mb_strlen( $item ) > 200 ) {
+			if ( '' === $item || mb_strlen( $item ) > 500 ) {
 				continue;
 			}
 			$clean[ $field ][] = $item;

@@ -96,6 +96,7 @@ class CF7SB_Server {
 			'domains'  => isset( $list['domains'] ) ? (array) $list['domains'] : array(),
 			'emails'   => isset( $list['emails'] ) ? (array) $list['emails'] : array(),
 			'keywords' => isset( $list['keywords'] ) ? (array) $list['keywords'] : array(),
+			'patterns' => isset( $list['patterns'] ) ? (array) $list['patterns'] : array(),
 			'message'  => isset( $list['message'] ) ? (string) $list['message'] : '',
 			'updated'  => isset( $list['updated'] ) ? $list['updated'] : null,
 		);
@@ -110,6 +111,7 @@ class CF7SB_Server {
 			'domains'  => CF7SB_Blocklist::sanitize_lines( isset( $data['domains'] ) ? $data['domains'] : array() ),
 			'emails'   => CF7SB_Blocklist::sanitize_lines( isset( $data['emails'] ) ? $data['emails'] : array() ),
 			'keywords' => CF7SB_Blocklist::sanitize_lines( isset( $data['keywords'] ) ? $data['keywords'] : array() ),
+			'patterns' => CF7SB_Blocklist::sanitize_patterns( isset( $data['patterns'] ) ? $data['patterns'] : array() ),
 			'message'  => isset( $data['message'] ) && is_string( $data['message'] )
 				? mb_substr( trim( wp_strip_all_tags( $data['message'] ) ), 0, 500 )
 				: '',

@@ -63,6 +63,7 @@ class CF7SB_Blocklist {
 			'domains'  => isset( $stored['domains'] ) ? (array) $stored['domains'] : array(),
 			'emails'   => isset( $stored['emails'] ) ? (array) $stored['emails'] : array(),
 			'keywords' => isset( $stored['keywords'] ) ? (array) $stored['keywords'] : array(),
+			'patterns' => isset( $stored['patterns'] ) ? (array) $stored['patterns'] : array(),
 			'message'  => isset( $stored['message'] ) ? (string) $stored['message'] : '',
 		);
 	}
@@ -140,15 +141,45 @@ class CF7SB_Blocklist {
 		return preg_match( '/^[a-zA-Z0-9_-]{1,50}$/', $list ) ? $list : 'default';
 	}
 
-	private static function store_lists( $domains, $keywords, $emails = array(), $message = '' ) {
+	private static function store_lists( $domains, $keywords, $emails = array(), $message = '', $patterns = array() ) {
 		$stored               = get_option( self::OPTION_LIST, array() );
 		$stored['domains']    = self::sanitize_lines( $domains );
 		$stored['emails']     = self::sanitize_lines( $emails );
 		$stored['keywords']   = self::sanitize_lines( $keywords );
+		$stored['patterns']   = self::sanitize_patterns( $patterns );
 		$stored['message']    = trim( wp_strip_all_tags( (string) $message ) );
 		$stored['fetched_at'] = time();
 		$stored['error']      = '';
 		update_option( self::OPTION_LIST, $stored, false );
+	}
+
+	/**
+	 * 正規表現パターンの配列を正規化する（trim・空行除去・重複除去・コンパイル不能なものを除外）。
+	 * デリミタは付けずに保存し、使用時に #...#iu で包む。
+	 */
+	public static function sanitize_patterns( $items ) {
+		$out = array();
+		foreach ( (array) $items as $item ) {
+			if ( ! is_string( $item ) ) {
+				continue;
+			}
+			$item = trim( $item );
+			if ( '' === $item || mb_strlen( $item ) > 500 ) {
+				continue;
+			}
+			if ( false === @preg_match( self::wrap_pattern( $item ), '' ) ) {
+				continue; // 正規表現として不正なものは除外
+			}
+			$out[] = $item;
+		}
+		return array_values( array_unique( $out ) );
+	}
+
+	/**
+	 * 保存用パターンを実行可能な正規表現にする。
+	 */
+	public static function wrap_pattern( $pattern ) {
+		return '#' . str_replace( '#', '\#', (string) $pattern ) . '#iu';
 	}
 
 	private static function store_error( $error ) {
@@ -173,7 +204,7 @@ class CF7SB_Blocklist {
 		$server_list = CF7SB_Server::local_list_name( $url );
 		if ( null !== $server_list ) {
 			$data = CF7SB_Server::get_list( $server_list );
-			self::store_lists( $data['domains'], $data['keywords'], $data['emails'], $data['message'] );
+			self::store_lists( $data['domains'], $data['keywords'], $data['emails'], $data['message'], $data['patterns'] );
 			return true;
 		}
 
@@ -193,7 +224,8 @@ class CF7SB_Blocklist {
 				isset( $data['domains'] ) ? $data['domains'] : array(),
 				isset( $data['keywords'] ) ? $data['keywords'] : array(),
 				isset( $data['emails'] ) ? $data['emails'] : array(),
-				isset( $data['message'] ) ? $data['message'] : ''
+				isset( $data['message'] ) ? $data['message'] : '',
+				isset( $data['patterns'] ) ? $data['patterns'] : array()
 			);
 			return true;
 		}
@@ -222,7 +254,8 @@ class CF7SB_Blocklist {
 			isset( $data['domains'] ) ? $data['domains'] : array(),
 			isset( $data['keywords'] ) ? $data['keywords'] : array(),
 			isset( $data['emails'] ) ? $data['emails'] : array(),
-			isset( $data['message'] ) ? $data['message'] : ''
+			isset( $data['message'] ) ? $data['message'] : '',
+			isset( $data['patterns'] ) ? $data['patterns'] : array()
 		);
 		return true;
 	}
@@ -234,7 +267,7 @@ class CF7SB_Blocklist {
 	 * @param string[] $keywords
 	 * @return true|WP_Error
 	 */
-	public static function push( $domains, $keywords, $emails = array(), $message = '' ) {
+	public static function push( $domains, $keywords, $emails = array(), $message = '', $patterns = array() ) {
 		$url = self::get_setting( 'url' );
 		$key = self::get_setting( 'key' );
 
@@ -249,6 +282,7 @@ class CF7SB_Blocklist {
 		$clean_keywords = self::sanitize_lines( $keywords );
 		$clean_emails   = self::sanitize_lines( $emails );
 		$clean_message  = trim( wp_strip_all_tags( (string) $message ) );
+		$clean_patterns = self::sanitize_patterns( $patterns );
 
 		// このサイト自身が中央サーバー（かんたんセットアップ方式）なら直接書く
 		$server_list = CF7SB_Server::local_list_name( $url );
@@ -260,9 +294,10 @@ class CF7SB_Blocklist {
 				'domains'  => $clean_domains,
 				'emails'   => $clean_emails,
 				'keywords' => $clean_keywords,
+				'patterns' => $clean_patterns,
 				'message'  => $clean_message,
 			) );
-			self::store_lists( $saved['domains'], $saved['keywords'], $saved['emails'], $saved['message'] );
+			self::store_lists( $saved['domains'], $saved['keywords'], $saved['emails'], $saved['message'], $saved['patterns'] );
 			return true;
 		}
 
@@ -283,6 +318,7 @@ class CF7SB_Blocklist {
 				'domains'  => $clean_domains,
 				'emails'   => $clean_emails,
 				'keywords' => $clean_keywords,
+				'patterns' => $clean_patterns,
 				'message'  => $clean_message,
 				'updated'  => date( 'c' ),
 			);
@@ -291,7 +327,7 @@ class CF7SB_Blocklist {
 				return new WP_Error( 'cf7sb_push_failed', 'ファイルの書き込みに失敗しました。' );
 			}
 
-			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message );
+			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message, $clean_patterns );
 			return true;
 		}
 
@@ -299,6 +335,7 @@ class CF7SB_Blocklist {
 			'domains'  => $clean_domains,
 			'emails'   => $clean_emails,
 			'keywords' => $clean_keywords,
+			'patterns' => $clean_patterns,
 			'message'  => $clean_message,
 		) );
 
@@ -332,10 +369,11 @@ class CF7SB_Blocklist {
 				$saved['domains'],
 				isset( $saved['keywords'] ) ? $saved['keywords'] : array(),
 				isset( $saved['emails'] ) ? $saved['emails'] : array(),
-				isset( $saved['message'] ) ? $saved['message'] : $clean_message
+				isset( $saved['message'] ) ? $saved['message'] : $clean_message,
+				isset( $saved['patterns'] ) ? $saved['patterns'] : $clean_patterns
 			);
 		} else {
-			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message );
+			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message, $clean_patterns );
 		}
 		return true;
 	}
