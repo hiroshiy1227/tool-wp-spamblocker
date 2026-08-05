@@ -61,6 +61,7 @@ class CF7SB_Blocklist {
 
 		return array(
 			'domains'  => isset( $stored['domains'] ) ? (array) $stored['domains'] : array(),
+			'emails'   => isset( $stored['emails'] ) ? (array) $stored['emails'] : array(),
 			'keywords' => isset( $stored['keywords'] ) ? (array) $stored['keywords'] : array(),
 		);
 	}
@@ -108,9 +109,10 @@ class CF7SB_Blocklist {
 		return preg_match( '/^[a-zA-Z0-9_-]{1,50}$/', $list ) ? $list : 'default';
 	}
 
-	private static function store_lists( $domains, $keywords ) {
+	private static function store_lists( $domains, $keywords, $emails = array() ) {
 		$stored               = get_option( self::OPTION_LIST, array() );
 		$stored['domains']    = self::sanitize_lines( $domains );
+		$stored['emails']     = self::sanitize_lines( $emails );
 		$stored['keywords']   = self::sanitize_lines( $keywords );
 		$stored['fetched_at'] = time();
 		$stored['error']      = '';
@@ -149,7 +151,8 @@ class CF7SB_Blocklist {
 			}
 			self::store_lists(
 				isset( $data['domains'] ) ? $data['domains'] : array(),
-				isset( $data['keywords'] ) ? $data['keywords'] : array()
+				isset( $data['keywords'] ) ? $data['keywords'] : array(),
+				isset( $data['emails'] ) ? $data['emails'] : array()
 			);
 			return true;
 		}
@@ -169,7 +172,8 @@ class CF7SB_Blocklist {
 
 		self::store_lists(
 			isset( $data['domains'] ) ? $data['domains'] : array(),
-			isset( $data['keywords'] ) ? $data['keywords'] : array()
+			isset( $data['keywords'] ) ? $data['keywords'] : array(),
+			isset( $data['emails'] ) ? $data['emails'] : array()
 		);
 		return true;
 	}
@@ -181,7 +185,7 @@ class CF7SB_Blocklist {
 	 * @param string[] $keywords
 	 * @return true|WP_Error
 	 */
-	public static function push( $domains, $keywords ) {
+	public static function push( $domains, $keywords, $emails = array() ) {
 		$url = self::get_setting( 'url' );
 		$key = self::get_setting( 'key' );
 
@@ -194,6 +198,7 @@ class CF7SB_Blocklist {
 
 		$clean_domains  = self::sanitize_lines( $domains );
 		$clean_keywords = self::sanitize_lines( $keywords );
+		$clean_emails   = self::sanitize_lines( $emails );
 
 		// 同一サーバーならファイルを直接書く
 		$local = self::local_api_file();
@@ -210,6 +215,7 @@ class CF7SB_Blocklist {
 			}
 			$payload = array(
 				'domains'  => $clean_domains,
+				'emails'   => $clean_emails,
 				'keywords' => $clean_keywords,
 				'updated'  => date( 'c' ),
 			);
@@ -218,12 +224,13 @@ class CF7SB_Blocklist {
 				return new WP_Error( 'cf7sb_push_failed', 'ファイルの書き込みに失敗しました。' );
 			}
 
-			self::store_lists( $clean_domains, $clean_keywords );
+			self::store_lists( $clean_domains, $clean_keywords, $clean_emails );
 			return true;
 		}
 
 		$body = wp_json_encode( array(
 			'domains'  => $clean_domains,
+			'emails'   => $clean_emails,
 			'keywords' => $clean_keywords,
 		) );
 
@@ -250,9 +257,13 @@ class CF7SB_Blocklist {
 		// サーバーが保存済みデータを返すので、再取得せずそのままキャッシュに反映（リクエスト数削減）
 		$saved = json_decode( wp_remote_retrieve_body( $response ), true );
 		if ( is_array( $saved ) && isset( $saved['domains'] ) ) {
-			self::store_lists( $saved['domains'], isset( $saved['keywords'] ) ? $saved['keywords'] : array() );
+			self::store_lists(
+				$saved['domains'],
+				isset( $saved['keywords'] ) ? $saved['keywords'] : array(),
+				isset( $saved['emails'] ) ? $saved['emails'] : array()
+			);
 		} else {
-			self::store_lists( $clean_domains, $clean_keywords );
+			self::store_lists( $clean_domains, $clean_keywords, $clean_emails );
 		}
 		return true;
 	}

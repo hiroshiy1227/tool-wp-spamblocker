@@ -41,6 +41,14 @@ class CF7SB_Validator {
 		$value = strtolower( trim( $value ) );
 		$list  = CF7SB_Blocklist::get();
 
+		// 拒否メールアドレス（完全一致）
+		foreach ( $list['emails'] as $email ) {
+			if ( strtolower( trim( $email ) ) === $value ) {
+				$result->invalidate( $tag, CF7SB_Blocklist::get_setting( 'message' ) );
+				return $result;
+			}
+		}
+
 		foreach ( $list['domains'] as $domain ) {
 			$domain = strtolower( $domain );
 			// 完全一致＋サブドメインも対象
@@ -59,7 +67,7 @@ class CF7SB_Validator {
 		}
 
 		$list    = CF7SB_Blocklist::get();
-		$needles = array_merge( $list['domains'], $list['keywords'] );
+		$needles = array_merge( $list['domains'], $list['emails'], $list['keywords'] );
 
 		foreach ( $needles as $needle ) {
 			if ( false !== stripos( $value, $needle ) ) {

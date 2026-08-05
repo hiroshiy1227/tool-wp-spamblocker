@@ -79,15 +79,20 @@ class CF7SB_Admin {
 		check_admin_referer( 'cf7sb_save_blocklist' );
 
 		$domains_text  = isset( $_POST['cf7sb_domains'] ) ? (string) wp_unslash( $_POST['cf7sb_domains'] ) : '';
+		$emails_text   = isset( $_POST['cf7sb_emails'] ) ? (string) wp_unslash( $_POST['cf7sb_emails'] ) : '';
 		$keywords_text = isset( $_POST['cf7sb_keywords'] ) ? (string) wp_unslash( $_POST['cf7sb_keywords'] ) : '';
 
-		$pushed = CF7SB_Blocklist::push( self::textarea_to_array( $domains_text ), self::textarea_to_array( $keywords_text ) );
+		$pushed = CF7SB_Blocklist::push(
+			self::textarea_to_array( $domains_text ),
+			self::textarea_to_array( $keywords_text ),
+			self::textarea_to_array( $emails_text )
+		);
 		if ( is_wp_error( $pushed ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $pushed->get_error_message(), MINUTE_IN_SECONDS );
 			// 入力内容を消さないよう保持して、再表示時にフォームへ戻す
 			set_transient(
 				'cf7sb_pending_input_' . get_current_user_id(),
-				array( 'domains' => $domains_text, 'keywords' => $keywords_text ),
+				array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text ),
 				10 * MINUTE_IN_SECONDS
 			);
 			self::redirect_back( 'push_failed' );
@@ -228,11 +233,14 @@ class CF7SB_Admin {
 
 		// 直前の保存が失敗していた場合は、入力していた内容をフォームに復元する
 		$pending       = get_transient( 'cf7sb_pending_input_' . get_current_user_id() );
+		$has_pending   = is_array( $pending );
 		$domains_text  = implode( "\n", $list['domains'] );
+		$emails_text   = implode( "\n", $list['emails'] );
 		$keywords_text = implode( "\n", $list['keywords'] );
-		if ( is_array( $pending ) ) {
+		if ( $has_pending ) {
 			delete_transient( 'cf7sb_pending_input_' . get_current_user_id() );
 			$domains_text  = isset( $pending['domains'] ) ? $pending['domains'] : $domains_text;
+			$emails_text   = isset( $pending['emails'] ) ? $pending['emails'] : $emails_text;
 			$keywords_text = isset( $pending['keywords'] ) ? $pending['keywords'] : $keywords_text;
 		}
 		?>
@@ -262,7 +270,7 @@ class CF7SB_Admin {
 					</li>
 					<li style="margin-bottom:1em;">
 						<strong>ブロック条件を登録</strong><br>
-						下の「ブロックリスト」で拒否ドメイン・拒否文字列を1行1件で入力して保存します。
+						下の「ブロックリスト」で拒否ドメイン・拒否メールアドレス・拒否文字列を1行1件で入力して保存します。
 					</li>
 					<li style="margin-bottom:1em;">
 						<strong>2サイト目以降</strong><br>
@@ -327,11 +335,15 @@ class CF7SB_Admin {
 			<h2>ブロックリスト</h2>
 			<p>
 				最終取得: <strong><?php echo esc_html( $fetched_at ); ?></strong>
-				（拒否ドメイン <?php echo count( $list['domains'] ); ?> 件 / 拒否文字列 <?php echo count( $list['keywords'] ); ?> 件）
+				（拒否ドメイン <?php echo count( $list['domains'] ); ?> 件 / 拒否メールアドレス <?php echo count( $list['emails'] ); ?> 件 / 拒否文字列 <?php echo count( $list['keywords'] ); ?> 件）
 				<?php if ( $fetch_error ) : ?>
 					<span style="color:#b32d2e;">取得エラー: <?php echo esc_html( $fetch_error ); ?>（前回取得分で動作中）</span>
 				<?php endif; ?>
 			</p>
+
+			<?php if ( $has_pending ) : ?>
+				<div class="notice notice-warning inline"><p><strong>⚠ 下の入力内容はまだ保存されていません。</strong>直前の保存が失敗したため、入力を復元して表示しています。上のエラーの原因を解消してから、もう一度「ブロックリストを保存」を押してください。</p></div>
+			<?php endif; ?>
 
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="display:inline-block; margin-bottom:1em;">
 				<?php wp_nonce_field( 'cf7sb_refresh' ); ?>
@@ -353,6 +365,14 @@ class CF7SB_Admin {
 							<textarea id="cf7sb_domains" name="cf7sb_domains" rows="8" class="large-text code"
 								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $domains_text ); ?></textarea>
 							<p class="description">メール欄はサブドメイン含む完全一致、本文・テキスト欄は文字列として含まれていればブロックします。例: <code>spam.com</code></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="cf7sb_emails">拒否メールアドレス（1行1件）</label></th>
+						<td>
+							<textarea id="cf7sb_emails" name="cf7sb_emails" rows="8" class="large-text code"
+								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $emails_text ); ?></textarea>
+							<p class="description">メール欄がこのアドレスと完全一致した場合にブロックします。gmail.com などフリーメールの迷惑送信者は、ドメインではなくこちらに登録してください。例: <code>spam@gmail.com</code></p>
 						</td>
 					</tr>
 					<tr>

@@ -44,7 +44,7 @@ $method = $_SERVER['REQUEST_METHOD'];
 
 if ( 'GET' === $method ) {
 	if ( ! is_file( $file ) ) {
-		cf7sb_respond( 200, array( 'domains' => array(), 'keywords' => array(), 'updated' => null ) );
+		cf7sb_respond( 200, array( 'domains' => array(), 'emails' => array(), 'keywords' => array(), 'updated' => null ) );
 	}
 	readfile( $file );
 	exit;
@@ -66,8 +66,8 @@ if ( 'POST' === $method ) {
 		cf7sb_respond( 400, array( 'error' => 'JSONの解析に失敗しました。' ) );
 	}
 
-	$clean = array( 'domains' => array(), 'keywords' => array() );
-	foreach ( array( 'domains', 'keywords' ) as $field ) {
+	$clean = array( 'domains' => array(), 'emails' => array(), 'keywords' => array() );
+	foreach ( array( 'domains', 'emails', 'keywords' ) as $field ) {
 		$items = isset( $data[ $field ] ) && is_array( $data[ $field ] ) ? $data[ $field ] : array();
 		foreach ( $items as $item ) {
 			if ( ! is_string( $item ) ) {
