@@ -22,6 +22,83 @@ class CF7SB_Validator {
 	public static function init() {
 		add_filter( 'wpcf7_spam', array( __CLASS__, 'spam_check' ), 10, 2 );
 		add_filter( 'wpcf7_display_message', array( __CLASS__, 'filter_display_message' ), 10, 2 );
+		add_filter( 'wpcf7_feedback_response', array( __CLASS__, 'mark_feedback_response' ), 10, 2 );
+		add_action( 'wp_footer', array( __CLASS__, 'print_frontend_script' ), 20 );
+	}
+
+	/**
+	 * AJAXの応答に自プラグインのブロック印を付ける（フロント側でフォームを消すために使う）。
+	 */
+	public static function mark_feedback_response( $response, $result = array() ) {
+		if ( self::$blocked && is_array( $response ) ) {
+			$response['cf7sb_blocked'] = true;
+		}
+		return $response;
+	}
+
+	/**
+	 * ブロック時にフォームを消し、入力値をクリアして拒否メッセージだけを残すスクリプト。
+	 * ブラウザバックで入力内容が復元されないよう、送信時点で値を空にする。
+	 */
+	public static function print_frontend_script() {
+		if ( ! function_exists( 'wpcf7_enqueue_scripts' ) ) {
+			return;
+		}
+		?>
+<style id="cf7sb-blocked-style">
+.cf7sb-blocked-notice{border:2px solid #d63638;border-radius:4px;background:#fff;color:#d63638;
+padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:center;}
+</style>
+<script id="cf7sb-blocked-script">
+( function () {
+	function clearFields( form ) {
+		var fields = form.querySelectorAll( 'input, textarea, select' );
+		Array.prototype.forEach.call( fields, function ( el ) {
+			var type = ( el.type || '' ).toLowerCase();
+			if ( 'hidden' === type || 'submit' === type || 'button' === type ) {
+				return;
+			}
+			if ( 'checkbox' === type || 'radio' === type ) {
+				el.checked = false;
+			} else if ( 'SELECT' === el.tagName ) {
+				el.selectedIndex = 0;
+			} else {
+				el.value = '';
+			}
+			el.setAttribute( 'autocomplete', 'off' );
+		} );
+	}
+
+	document.addEventListener( 'wpcf7submit', function ( event ) {
+		var res = event.detail && event.detail.apiResponse;
+		if ( ! res || ! res.cf7sb_blocked ) {
+			return;
+		}
+
+		var form = event.target.tagName === 'FORM'
+			? event.target
+			: event.target.querySelector( 'form.wpcf7-form' );
+		if ( ! form ) {
+			return;
+		}
+
+		// ブラウザバックで復元されないよう、まず入力値を消す
+		clearFields( form );
+
+		var notice = document.createElement( 'div' );
+		notice.className = 'cf7sb-blocked-notice';
+		notice.setAttribute( 'role', 'alert' );
+		notice.textContent = res.message || '';
+
+		// フォームの中身をすべて取り除き、メッセージだけを残す
+		var wrapper = form.closest( '.wpcf7' ) || form.parentNode;
+		form.parentNode.removeChild( form );
+		wrapper.innerHTML = '';
+		wrapper.appendChild( notice );
+	}, false );
+} )();
+</script>
+		<?php
 	}
 
 	/**
