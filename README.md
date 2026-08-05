@@ -1,6 +1,6 @@
 # CF7 Spam Blocker
 
-Contact Form 7 用の迷惑メールブロッカー。拒否ドメイン・拒否文字列のブロックリストを中央サーバーに置き、複数サイトで共有します。WordPress.org 非登録の自前配布で、プラグイン本体の更新は GitHub Releases 経由で全サイトに通知されます。
+Contact Form 7 用の迷惑メールブロッカー。複数のWordPressサイトの迷惑メール対策を、1つのブロックリストで一括管理できます。WordPress.org 非登録の自前配布で、プラグイン本体の更新は GitHub Releases 経由で全サイトに通知されます。
 
 ## 構成
 
