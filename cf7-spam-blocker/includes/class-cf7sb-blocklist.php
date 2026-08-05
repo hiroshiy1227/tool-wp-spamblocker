@@ -36,7 +36,7 @@ class CF7SB_Blocklist {
 		$defaults = array(
 			'url'     => '',
 			'key'     => '',
-			'message' => '送信できない内容が含まれています。',
+			'message' => '迷惑行為と判定されたため送信を拒否しました。',
 		);
 		return wp_parse_args( (array) get_option( self::OPTION_SETTINGS, array() ), $defaults );
 	}

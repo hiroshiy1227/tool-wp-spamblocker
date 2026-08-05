@@ -47,7 +47,7 @@ class CF7SB_Admin {
 		$settings['key']     = sanitize_text_field( isset( $_POST['cf7sb_key'] ) ? wp_unslash( $_POST['cf7sb_key'] ) : '' );
 		$settings['message'] = sanitize_text_field( isset( $_POST['cf7sb_message'] ) ? wp_unslash( $_POST['cf7sb_message'] ) : '' );
 		if ( '' === $settings['message'] ) {
-			$settings['message'] = '送信できない内容が含まれています。';
+			$settings['message'] = '迷惑行為と判定されたため送信を拒否しました。';
 		}
 
 		// セットアップコードが貼り付けられていれば、URL・キーをコードから一括設定
