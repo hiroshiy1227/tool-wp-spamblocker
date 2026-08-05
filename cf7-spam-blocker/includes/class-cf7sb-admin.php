@@ -17,6 +17,7 @@ class CF7SB_Admin {
 		add_action( 'admin_post_cf7sb_save_blocklist', array( __CLASS__, 'handle_save_blocklist' ) );
 		add_action( 'admin_post_cf7sb_refresh', array( __CLASS__, 'handle_refresh' ) );
 		add_action( 'admin_post_cf7sb_download_server', array( __CLASS__, 'handle_download_server' ) );
+		add_action( 'admin_post_cf7sb_deploy_server', array( __CLASS__, 'handle_deploy_server' ) );
 		add_action( 'admin_notices', array( __CLASS__, 'notices' ) );
 	}
 
@@ -154,6 +155,56 @@ class CF7SB_Admin {
 	}
 
 	/**
+	 * APIがこのサイトと同じサーバーにある場合、blocklist-api.php をFTPなしで直接設置・修復する。
+	 * このサイトの秘密キーを埋め込んで書き込む（キーが未設定なら自動生成して保存）。
+	 * リストデータ（lists/ ディレクトリ）には触れない。
+	 */
+	public static function handle_deploy_server() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( '権限がありません。' );
+		}
+		check_admin_referer( 'cf7sb_deploy_server' );
+
+		$target = CF7SB_Blocklist::local_api_target();
+		if ( ! $target ) {
+			set_transient( 'cf7sb_last_error_' . get_current_user_id(), 'ブロックリストURLがこのサイトと同じサーバーを指していないため、自動設置できません。', MINUTE_IN_SECONDS );
+			self::redirect_back( 'deploy_failed' );
+		}
+
+		$settings = CF7SB_Blocklist::get_settings();
+		if ( '' === $settings['key'] ) {
+			$settings['key'] = 'cf7sb-' . bin2hex( random_bytes( 20 ) );
+			update_option( CF7SB_Blocklist::OPTION_SETTINGS, $settings, false );
+		}
+
+		$template = file_get_contents( CF7SB_DIR . 'server/blocklist-api.tpl' );
+		if ( false === $template ) {
+			set_transient( 'cf7sb_last_error_' . get_current_user_id(), 'テンプレートファイルが見つかりません。プラグインを再インストールしてください。', MINUTE_IN_SECONDS );
+			self::redirect_back( 'deploy_failed' );
+		}
+
+		$file = preg_replace(
+			"/const CF7SB_API_KEY = '[^']*';/",
+			'const CF7SB_API_KEY = ' . var_export( $settings['key'], true ) . ';',
+			$template,
+			1
+		);
+
+		$dir = dirname( $target );
+		if ( ! is_dir( $dir ) && ! mkdir( $dir, 0755, true ) ) {
+			set_transient( 'cf7sb_last_error_' . get_current_user_id(), '設置先ディレクトリを作成できませんでした（書き込み権限を確認してください）。', MINUTE_IN_SECONDS );
+			self::redirect_back( 'deploy_failed' );
+		}
+		if ( false === file_put_contents( $target, $file, LOCK_EX ) ) {
+			set_transient( 'cf7sb_last_error_' . get_current_user_id(), 'ファイルを書き込めませんでした（書き込み権限を確認してください）。', MINUTE_IN_SECONDS );
+			self::redirect_back( 'deploy_failed' );
+		}
+
+		CF7SB_Blocklist::refresh();
+		self::redirect_back( 'server_deployed' );
+	}
+
+	/**
 	 * セットアップコード（URL＋キーをまとめた文字列）の生成と復元。
 	 * 形式: CF7SB1:<base64({"url":"...","key":"..."})>
 	 */
@@ -200,6 +251,8 @@ class CF7SB_Admin {
 			'settings_saved'  => array( 'success', '接続設定を保存しました。' ),
 			'blocklist_saved' => array( 'success', 'ブロックリストを中央サーバーに保存しました。同じリストを参照する全サイトに反映されます（各サイトの次回取得時）。' ),
 			'refreshed'       => array( 'success', 'ブロックリストを再取得しました。' ),
+			'server_deployed' => array( 'success', 'サーバーファイル（blocklist-api.php）を設置し、このサイトの秘密キーと同期しました。' ),
+			'deploy_failed'   => array( 'error', 'サーバーファイルの設置に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
 			'push_failed'     => array( 'error', 'ブロックリストの保存に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
 			'code_invalid'    => array( 'error', 'セットアップコードを読み取れませんでした。コピー元のサイトで表示されたコードを、そのまま全部貼り付けてください。' ),
 			'refresh_failed'  => array( 'error', 'ブロックリストの取得に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
@@ -263,6 +316,7 @@ class CF7SB_Admin {
 					<li style="margin-bottom:1em;">
 						<strong>サーバーにアップロード</strong><br>
 						FTPなどで、管理しているサーバーの任意の場所に設置します（例: <code>https://example.com/cf7sb/blocklist-api.php</code>）。設置は全サイト共通で<strong>1回だけ</strong>です。
+						<p class="description" style="margin:0.3em 0 0;">※ 設置先が<strong>このサイトと同じサーバー</strong>の場合は、手順3でURLを保存すると「サーバーファイルを自動設置」ボタンが現れ、ダウンロードもFTPも不要になります。</p>
 					</li>
 					<li style="margin-bottom:1em;">
 						<strong>接続設定を保存</strong><br>
@@ -329,6 +383,25 @@ class CF7SB_Admin {
 				</table>
 				<?php submit_button( '接続設定を保存' ); ?>
 			</form>
+
+			<?php
+			$local_target = CF7SB_Blocklist::local_api_target();
+			if ( $local_target ) :
+				$target_exists = is_file( $local_target );
+			?>
+				<div style="margin:0 0 1em; padding:0.8em 1.2em; background:#fff; border-left:4px solid #2271b1; box-shadow:0 1px 1px rgba(0,0,0,.04); max-width:800px;">
+					<p style="margin:0 0 0.6em;">
+						<strong>ブロックリストURLはこのサイトと同じサーバーです。</strong>
+						FTPを使わずに、ここからサーバーファイル（blocklist-api.php）を直接<?php echo $target_exists ? '修復・更新' : '設置'; ?>できます。
+					</p>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0;">
+						<?php wp_nonce_field( 'cf7sb_deploy_server' ); ?>
+						<input type="hidden" name="action" value="cf7sb_deploy_server">
+						<button type="submit" class="button button-primary"><?php echo $target_exists ? 'サーバーファイルを修復（キーを同期）' : 'サーバーファイルを自動設置'; ?></button>
+					</form>
+					<p class="description" style="margin:0.6em 0 0;">このサイトの秘密キー（未設定なら自動生成）を埋め込んだ最新のファイルを書き込みます。登録済みのブロックリストのデータはそのまま保持されます。</p>
+				</div>
+			<?php endif; ?>
 
 			<hr>
 

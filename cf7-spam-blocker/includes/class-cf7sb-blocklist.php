@@ -67,13 +67,12 @@ class CF7SB_Blocklist {
 	}
 
 	/**
-	 * APIのURLがこのサイト自身と同じサーバーを指す場合、blocklist-api.php のファイルパスを返す。
-	 * 同一サーバーではHTTPを介さず直接ファイルを読み書きすることで、
-	 * ホスティングのレートリミット（HTTP 429）を回避しつつ高速化する。
+	 * APIのURLがこのサイト自身と同じサーバーを指す場合、blocklist-api.php の設置先パスを返す。
+	 * ファイルが未設置でもパスを返す（自動設置に使う）。別サーバーなら null。
 	 *
 	 * @return string|null
 	 */
-	private static function local_api_file() {
+	public static function local_api_target() {
 		$url = self::get_setting( 'url' );
 		if ( ! $url ) {
 			return null;
@@ -92,7 +91,26 @@ class CF7SB_Blocklist {
 		if ( empty( $_SERVER['DOCUMENT_ROOT'] ) || empty( $api['path'] ) ) {
 			return null;
 		}
-		$file = realpath( rtrim( wp_unslash( $_SERVER['DOCUMENT_ROOT'] ), '/' ) . $api['path'] );
+		$path = $api['path'];
+		if ( '.php' !== substr( $path, -4 ) || false !== strpos( $path, '..' ) ) {
+			return null;
+		}
+		return rtrim( wp_unslash( $_SERVER['DOCUMENT_ROOT'] ), '/' ) . $path;
+	}
+
+	/**
+	 * APIのURLがこのサイト自身と同じサーバーを指し、かつファイルが実在する場合にそのパスを返す。
+	 * 同一サーバーではHTTPを介さず直接ファイルを読み書きすることで、
+	 * ホスティングのレートリミット（HTTP 429）を回避しつつ高速化する。
+	 *
+	 * @return string|null
+	 */
+	private static function local_api_file() {
+		$target = self::local_api_target();
+		if ( ! $target ) {
+			return null;
+		}
+		$file = realpath( $target );
 		return ( $file && is_file( $file ) ) ? $file : null;
 	}
 
