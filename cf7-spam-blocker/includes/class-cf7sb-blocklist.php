@@ -169,6 +169,14 @@ class CF7SB_Blocklist {
 			return new WP_Error( 'cf7sb_no_url', 'ブロックリストURLが設定されていません。' );
 		}
 
+		// このサイト自身が中央サーバー（かんたんセットアップ方式）なら直接読む
+		$server_list = CF7SB_Server::local_list_name( $url );
+		if ( null !== $server_list ) {
+			$data = CF7SB_Server::get_list( $server_list );
+			self::store_lists( $data['domains'], $data['keywords'], $data['emails'], $data['message'] );
+			return true;
+		}
+
 		// 同一サーバーならファイルを直接読む
 		$local = self::local_api_file();
 		if ( $local ) {
@@ -199,10 +207,11 @@ class CF7SB_Blocklist {
 		if ( 200 !== $code ) {
 			// サーバーがエラー内容を返していれば、そのまま伝える（原因の特定を容易にするため）
 			$detail = json_decode( wp_remote_retrieve_body( $response ), true );
-			$message = ( is_array( $detail ) && ! empty( $detail['error'] ) )
-				? $detail['error'] . '（HTTP ' . $code . '）'
-				: 'HTTP ' . $code;
-			return self::store_error( $message );
+			$reason = '';
+			if ( is_array( $detail ) ) {
+				$reason = ! empty( $detail['error'] ) ? $detail['error'] : ( ! empty( $detail['message'] ) ? $detail['message'] : '' );
+			}
+			return self::store_error( $reason ? $reason . '（HTTP ' . $code . '）' : 'HTTP ' . $code );
 		}
 		$data = json_decode( wp_remote_retrieve_body( $response ), true );
 		if ( ! is_array( $data ) ) {
@@ -240,6 +249,22 @@ class CF7SB_Blocklist {
 		$clean_keywords = self::sanitize_lines( $keywords );
 		$clean_emails   = self::sanitize_lines( $emails );
 		$clean_message  = trim( wp_strip_all_tags( (string) $message ) );
+
+		// このサイト自身が中央サーバー（かんたんセットアップ方式）なら直接書く
+		$server_list = CF7SB_Server::local_list_name( $url );
+		if ( null !== $server_list ) {
+			if ( ! hash_equals( CF7SB_Server::get_key(), $key ) ) {
+				return new WP_Error( 'cf7sb_push_failed', '秘密キーが一致しません。' );
+			}
+			$saved = CF7SB_Server::save_list( $server_list, array(
+				'domains'  => $clean_domains,
+				'emails'   => $clean_emails,
+				'keywords' => $clean_keywords,
+				'message'  => $clean_message,
+			) );
+			self::store_lists( $saved['domains'], $saved['keywords'], $saved['emails'], $saved['message'] );
+			return true;
+		}
 
 		// 同一サーバーならファイルを直接書く
 		$local = self::local_api_file();
@@ -293,7 +318,10 @@ class CF7SB_Blocklist {
 		$code = wp_remote_retrieve_response_code( $response );
 		if ( 200 !== $code ) {
 			$detail = json_decode( wp_remote_retrieve_body( $response ), true );
-			$msg    = isset( $detail['error'] ) ? $detail['error'] : 'HTTP ' . $code;
+			$msg    = 'HTTP ' . $code;
+			if ( is_array( $detail ) ) {
+				$msg = ! empty( $detail['error'] ) ? $detail['error'] : ( ! empty( $detail['message'] ) ? $detail['message'] : $msg );
+			}
 			return new WP_Error( 'cf7sb_push_failed', $msg );
 		}
 

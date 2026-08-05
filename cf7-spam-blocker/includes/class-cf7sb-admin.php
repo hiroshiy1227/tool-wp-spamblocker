@@ -18,6 +18,8 @@ class CF7SB_Admin {
 		add_action( 'admin_post_cf7sb_refresh', array( __CLASS__, 'handle_refresh' ) );
 		add_action( 'admin_post_cf7sb_download_server', array( __CLASS__, 'handle_download_server' ) );
 		add_action( 'admin_post_cf7sb_deploy_server', array( __CLASS__, 'handle_deploy_server' ) );
+		add_action( 'admin_post_cf7sb_enable_server', array( __CLASS__, 'handle_enable_server' ) );
+		add_action( 'admin_post_cf7sb_disable_server', array( __CLASS__, 'handle_disable_server' ) );
 		add_action( 'admin_notices', array( __CLASS__, 'notices' ) );
 	}
 
@@ -123,6 +125,29 @@ class CF7SB_Admin {
 		}
 
 		self::redirect_back( 'refreshed', 'blocklist' );
+	}
+
+	/**
+	 * このサイトを中央サーバーにする（かんたんセットアップ）。
+	 */
+	public static function handle_enable_server() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( '権限がありません。' );
+		}
+		check_admin_referer( 'cf7sb_enable_server' );
+
+		CF7SB_Server::enable();
+		self::redirect_back( 'server_enabled', 'setup' );
+	}
+
+	public static function handle_disable_server() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( '権限がありません。' );
+		}
+		check_admin_referer( 'cf7sb_disable_server' );
+
+		CF7SB_Server::disable();
+		self::redirect_back( 'server_disabled', 'setup' );
 	}
 
 	/**
@@ -288,6 +313,8 @@ class CF7SB_Admin {
 			'blocklist_saved' => array( 'success', 'ブロックリストを中央サーバーに保存しました。同じリストを参照する全サイトに反映されます（各サイトの次回取得時）。' ),
 			'refreshed'       => array( 'success', 'ブロックリストを再取得しました。' ),
 			'server_deployed' => array( 'success', 'サーバーファイル（blocklist-api.php）を設置し、このサイトの秘密キーと同期しました。' ),
+			'server_enabled'  => array( 'success', 'このサイトを中央サーバーにしました。他のサイトは、下の「セットアップコード」を貼り付けるだけで接続できます。' ),
+			'server_disabled' => array( 'success', '中央サーバー機能を停止しました（保存済みのリストデータは残っています）。' ),
 			'deploy_failed'   => array( 'error', 'サーバーファイルの設置に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
 			'deploy_unverified' => array(
 				'error',
@@ -359,7 +386,47 @@ class CF7SB_Admin {
 			</h2>
 
 			<?php if ( 'setup' === $tab ) : ?>
-			<div style="padding:0.8em 1.2em; background:#fff; border:1px solid #c3c4c7; border-radius:4px; max-width:800px; margin-bottom:1em;">
+
+			<?php if ( CF7SB_Server::is_enabled() ) : ?>
+				<div style="padding:1em 1.4em; background:#fff; border-left:4px solid #00a32a; box-shadow:0 1px 1px rgba(0,0,0,.04); max-width:800px; margin-bottom:1em;">
+					<p style="margin:0 0 0.6em; font-size:1.05em;"><strong>✅ このサイトは中央サーバーです。</strong>ブロックリストはこのサイトに保管され、接続した全サイトに配信されます。</p>
+					<p style="margin:0 0 0.4em;"><strong>他のサイトを追加する手順（コピペ1回）</strong></p>
+					<ol style="margin:0 0 1em;">
+						<li>新しいサイトにこのプラグインをインストール・有効化</li>
+						<li>下のセットアップコードをコピーし、新しいサイトの「接続設定」タブの「セットアップコード」欄に貼り付けて保存</li>
+					</ol>
+					<input type="text" readonly id="cf7sb_setup_code_out" class="large-text code"
+						value="<?php echo esc_attr( self::encode_setup_code( $settings['url'], $settings['key'] ) ); ?>"
+						onclick="this.select();">
+					<button type="button" class="button button-primary" id="cf7sb_code_copy" style="margin-top:6px;">セットアップコードをコピー</button>
+					<p class="description" style="margin:0.8em 0 0;">
+						配信URL: <code><?php echo esc_html( $settings['url'] ); ?></code><br>
+						動作確認: フォームのメール欄に拒否ドメインのアドレスを入力して送信し、「<?php echo esc_html( $message_text ); ?>」と表示されればOKです。
+					</p>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0.8em 0 0;">
+						<?php wp_nonce_field( 'cf7sb_disable_server' ); ?>
+						<input type="hidden" name="action" value="cf7sb_disable_server">
+						<button type="submit" class="button button-link-delete" onclick="return confirm('中央サーバー機能を停止しますか？（リストのデータは残ります）');">中央サーバーを停止する</button>
+					</form>
+				</div>
+			<?php else : ?>
+				<div style="padding:1em 1.4em; background:#fff; border-left:4px solid #2271b1; box-shadow:0 1px 1px rgba(0,0,0,.04); max-width:800px; margin-bottom:1em;">
+					<p style="margin:0 0 0.6em; font-size:1.05em;"><strong>かんたんセットアップ（推奨）</strong> — ファイル設置・FTP・キー管理は不要です。</p>
+					<p style="margin:0 0 0.4em;"><strong>1サイト目（ブロックリストの保管場所にするサイト）:</strong></p>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0 0 0.8em;">
+						<?php wp_nonce_field( 'cf7sb_enable_server' ); ?>
+						<input type="hidden" name="action" value="cf7sb_enable_server">
+						<button type="submit" class="button button-primary button-hero">このサイトを中央サーバーにする</button>
+					</form>
+					<p class="description" style="margin:0 0 1em;">ボタンを押すだけで完了します。このサイトのWordPress内にリストが保管され、秘密キーと接続設定も自動で整います。</p>
+					<p style="margin:0 0 0.4em;"><strong>2サイト目以降:</strong></p>
+					<p class="description" style="margin:0;">中央サーバーにしたサイトの「初期セットアップ」タブでセットアップコードをコピーし、このサイトの「接続設定」タブに貼り付けて保存するだけです。</p>
+				</div>
+			<?php endif; ?>
+
+			<details style="max-width:800px; margin-bottom:1em;">
+				<summary style="cursor:pointer; padding:0.4em 0;">外部サーバー方式（従来・上級者向け）— WordPressのないサーバーにリストを置きたい場合のみ</summary>
+			<div style="padding:0.8em 1.2em; background:#fff; border:1px solid #c3c4c7; border-radius:4px; margin-top:0.5em;">
 				<ol style="margin-top:0;">
 					<li style="margin-bottom:1em;">
 						<strong>サーバー設置ファイルをダウンロード</strong><br>
@@ -389,11 +456,10 @@ class CF7SB_Admin {
 						ファイル設置は不要です。設定済みサイトの「セットアップコード」をコピーし、新しいサイトの同じ欄に貼り付けて保存するだけで、URLと秘密キーが一括設定され同じリストが共有されます。
 					</li>
 				</ol>
-				<p style="margin-bottom:1em;">動作確認: Contact Form 7 のフォームのメール欄に拒否ドメインのアドレスを入力して送信し、「<?php echo esc_html( $message_text ); ?>」と表示されればOKです。</p>
 			</div>
 
 			<?php
-			$local_target = CF7SB_Blocklist::local_api_target();
+			$local_target = CF7SB_Server::is_enabled() ? null : CF7SB_Blocklist::local_api_target();
 			if ( $local_target ) :
 				$target_exists = is_file( $local_target );
 			?>
@@ -414,6 +480,7 @@ class CF7SB_Admin {
 					</p>
 				</div>
 			<?php endif; ?>
+			</details>
 			<?php endif; ?>
 
 			<?php if ( 'connection' === $tab ) : ?>
