@@ -119,6 +119,17 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 		form.parentNode.removeChild( form );
 		wrapper.innerHTML = '';
 		wrapper.appendChild( notice );
+
+		// スクロール位置をページ最上部に戻す。
+		// それでもメッセージが画面外になる場合は、メッセージ自体を画面内に入れる。
+		window.scrollTo( 0, 0 );
+		window.requestAnimationFrame( function () {
+			var rect = notice.getBoundingClientRect();
+			var height = window.innerHeight || document.documentElement.clientHeight;
+			if ( rect.bottom < 0 || rect.top > height ) {
+				notice.scrollIntoView( { block: 'center' } );
+			}
+		} );
 	}, false );
 } )();
 </script>
