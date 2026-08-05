@@ -27,12 +27,36 @@ class CF7SB_Validator {
 	}
 
 	/**
-	 * AJAXの応答に自プラグインのブロック印を付ける（フロント側でフォームを消すために使う）。
+	 * 応答を最終的に上書きしてブロックを確定させる。
+	 *
+	 * CF7は「入力チェックを通過した送信」しかスパム判定にかけない（submission.php の proceed）。
+	 * そのため必須項目が空のままだと validation_failed で止まり、拒否条件の判定が行われない。
+	 * ここで改めて判定し、入力チェックの結果にかかわらずブロックを適用する。
 	 */
 	public static function mark_feedback_response( $response, $result = array() ) {
-		if ( self::$blocked && is_array( $response ) ) {
-			$response['cf7sb_blocked'] = true;
+		if ( ! is_array( $response ) ) {
+			return $response;
 		}
+
+		if ( ! self::$blocked && class_exists( 'WPCF7_Submission' ) ) {
+			$submission = WPCF7_Submission::get_instance();
+			if ( $submission && self::submission_blocked( $submission ) ) {
+				self::$blocked = true;
+			}
+		}
+
+		if ( self::$blocked ) {
+			$message = CF7SB_Blocklist::get_setting( 'message' );
+
+			$response['status']        = 'spam';
+			$response['cf7sb_blocked'] = true;
+			if ( '' !== $message ) {
+				$response['message'] = $message;
+			}
+			// どの項目が原因かを伝えないよう、フィールド単位のエラーは返さない
+			unset( $response['invalid_fields'] );
+		}
+
 		return $response;
 	}
 
