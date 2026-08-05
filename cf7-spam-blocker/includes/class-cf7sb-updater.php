@@ -58,10 +58,8 @@ class CF7SB_Updater {
 			return $update;
 		}
 
-		if ( version_compare( $info['version'], CF7SB_VERSION, '<=' ) ) {
-			return $update;
-		}
-
+		// 最新版のときも情報を返す（バージョン比較はWP本体が行い、no_updateに分類される）。
+		// 常に返すことで「自動更新を有効化/無効化」トグルが表示されるようになる。
 		return array(
 			'id'           => self::update_uri(),
 			'slug'         => dirname( $plugin_file ),
