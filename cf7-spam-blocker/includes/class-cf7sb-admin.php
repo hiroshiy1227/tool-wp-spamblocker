@@ -214,7 +214,7 @@ class CF7SB_Admin {
 
 		$messages = array(
 			'settings_saved'  => array( 'success', '接続設定を保存しました。' ),
-			'blocklist_saved' => array( 'success', 'ブロックリストを中央サーバーに保存しました。同じリストを参照する全サイトに反映されます（各サイトの次回取得時）。' ),
+			'blocklist_saved' => array( 'success', 'ブロックリストを中央サーバーに保存しました。同じリストを参照する全サイトに即時反映されます。' ),
 			'refreshed'       => array( 'success', 'ブロックリストを再取得しました。' ),
 			'server_enabled'  => array( 'success', 'このサイトを中央サーバーにしました。他のサイトは、下の「セットアップコード」を貼り付けるだけで接続できます。' ),
 			'server_disabled' => array( 'success', '中央サーバー機能を停止しました（保存済みのリストデータは残っています）。' ),
@@ -425,26 +425,26 @@ class CF7SB_Admin {
 						</td>
 					</tr>
 					<tr>
-						<th scope="row"><label for="cf7sb_domains">拒否ドメイン（1行1件）</label></th>
+						<th scope="row"><label for="cf7sb_domains">拒否ドメイン</label></th>
 						<td>
-							<textarea id="cf7sb_domains" name="cf7sb_domains" rows="8" class="large-text code"
-								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $domains_text ); ?></textarea>
+							<textarea id="cf7sb_domains" name="cf7sb_domains" rows="8" class="large-text code cf7sb-taglist"
+								data-cf7sb-label="拒否ドメイン" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $domains_text ); ?></textarea>
 							<p class="description">メール欄はサブドメイン含む完全一致、本文・テキスト欄は文字列として含まれていればブロックします。例: <code>spam.com</code></p>
 						</td>
 					</tr>
 					<tr>
-						<th scope="row"><label for="cf7sb_emails">拒否メールアドレス（1行1件）</label></th>
+						<th scope="row"><label for="cf7sb_emails">拒否メールアドレス</label></th>
 						<td>
-							<textarea id="cf7sb_emails" name="cf7sb_emails" rows="8" class="large-text code"
-								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $emails_text ); ?></textarea>
+							<textarea id="cf7sb_emails" name="cf7sb_emails" rows="8" class="large-text code cf7sb-taglist"
+								data-cf7sb-label="拒否メールアドレス" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $emails_text ); ?></textarea>
 							<p class="description">メール欄がこのアドレスと完全一致した場合にブロックします。gmail.com などフリーメールの迷惑送信者は、ドメインではなくこちらに登録してください。例: <code>spam@gmail.com</code></p>
 						</td>
 					</tr>
 					<tr>
-						<th scope="row"><label for="cf7sb_keywords">拒否文字列（1行1件）</label></th>
+						<th scope="row"><label for="cf7sb_keywords">拒否文字列</label></th>
 						<td>
-							<textarea id="cf7sb_keywords" name="cf7sb_keywords" rows="8" class="large-text code"
-								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $keywords_text ); ?></textarea>
+							<textarea id="cf7sb_keywords" name="cf7sb_keywords" rows="8" class="large-text code cf7sb-taglist"
+								data-cf7sb-label="拒否文字列" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $keywords_text ); ?></textarea>
 							<p class="description">本文・テキスト欄にこの文字列（会社名など）が含まれていればブロックします。</p>
 						</td>
 					</tr>
@@ -460,14 +460,13 @@ class CF7SB_Admin {
 						</td>
 					</tr>
 					<tr>
-						<th scope="row"><label for="cf7sb_patterns">拒否パターン（正規表現・1行1件）</label></th>
+						<th scope="row"><label for="cf7sb_patterns">拒否パターン（正規表現）</label></th>
 						<td>
-							<textarea id="cf7sb_patterns" name="cf7sb_patterns" rows="6" class="large-text code"
-								<?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $patterns_text ); ?></textarea>
+							<textarea id="cf7sb_patterns" name="cf7sb_patterns" rows="6" class="large-text code cf7sb-taglist"
+								data-cf7sb-label="拒否パターン（正規表現）" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $patterns_text ); ?></textarea>
 							<p class="description">
 								すべての入力欄（メール・電話・URL含む）に対して正規表現で判定します。デリミタ（<code>/～/</code>）は不要、大文字小文字は区別しません。<br>
-								例1（UUID形式の管理番号）: <code>\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b</code><br>
-								例2（スペースを挟んだドメイン偽装）: <code>spam\s*\.\s*co\s*\.\s*jp</code>
+								例（スペースを挟んだドメイン偽装）: <code>spam\s*\.\s*co\s*\.\s*jp</code>
 							</p>
 						</td>
 					</tr>
@@ -478,6 +477,23 @@ class CF7SB_Admin {
 			</form>
 			<?php endif; ?>
 		</div>
+		<style>
+		.cf7sb-tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:640px;min-height:38px;
+			padding:8px;border:1px solid #8c8f94;border-radius:4px;background:#fff;box-sizing:border-box;}
+		.cf7sb-tag{display:inline-flex;align-items:center;gap:5px;background:#f0f0f1;border:1px solid #c3c4c7;
+			border-radius:3px;padding:3px 8px;font-size:13px;font-family:Consolas,Monaco,monospace;word-break:break-all;}
+		.cf7sb-tag-x{border:0;background:none;color:#787c82;cursor:pointer;padding:0 2px;font-size:16px;line-height:1;}
+		.cf7sb-tag-x:hover{color:#d63638;}
+		.cf7sb-tags-empty{color:#787c82;font-size:13px;}
+		.cf7sb-tag-add{flex-shrink:0;}
+		.cf7sb-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100100;}
+		.cf7sb-modal-overlay.open{display:flex;align-items:flex-start;justify-content:center;padding-top:12vh;}
+		.cf7sb-modal{background:#fff;border-radius:4px;box-shadow:0 3px 30px rgba(0,0,0,.3);
+			padding:1.2em 1.5em 1.4em;width:540px;max-width:90vw;box-sizing:border-box;}
+		.cf7sb-modal-title{margin:0 0 .3em;font-size:1.15em;}
+		.cf7sb-modal-buttons{margin-top:.9em;text-align:right;}
+		.cf7sb-modal-buttons .button{margin-left:6px;}
+		</style>
 		<script>
 		( function () {
 			function copyValue( input, button ) {
@@ -514,6 +530,130 @@ class CF7SB_Admin {
 			if ( codeOut && codeCopy ) {
 				codeCopy.addEventListener( 'click', function () { copyValue( codeOut, codeCopy ); } );
 			}
+
+			// タグ入力UI: textareaを隠し、登録済み項目をタグで表示。追加はモーダル、削除は×ボタン。
+			// 値の実体は元のtextareaに持たせたままなので、保存処理・入力復元はそのまま動く。
+			var modalOverlay = null, modalTitle = null, modalInput = null, modalOnAdd = null;
+
+			function splitLines( text ) {
+				return text.split( /\r\n|\r|\n/ )
+					.map( function ( s ) { return s.trim(); } )
+					.filter( function ( s ) { return '' !== s; } );
+			}
+
+			function ensureModal() {
+				if ( modalOverlay ) {
+					return;
+				}
+				modalOverlay = document.createElement( 'div' );
+				modalOverlay.className = 'cf7sb-modal-overlay';
+				modalOverlay.innerHTML =
+					'<div class="cf7sb-modal" role="dialog" aria-modal="true">' +
+					'<h2 class="cf7sb-modal-title"></h2>' +
+					'<p class="description">1行に1件ずつ入力してください（複数行まとめて貼り付けも可）。</p>' +
+					'<textarea rows="5" class="large-text code cf7sb-modal-input"></textarea>' +
+					'<div class="cf7sb-modal-buttons">' +
+					'<button type="button" class="button cf7sb-modal-cancel">キャンセル</button>' +
+					'<button type="button" class="button button-primary cf7sb-modal-add">追加する</button>' +
+					'</div></div>';
+				document.body.appendChild( modalOverlay );
+				modalTitle = modalOverlay.querySelector( '.cf7sb-modal-title' );
+				modalInput = modalOverlay.querySelector( '.cf7sb-modal-input' );
+
+				var close = function () { modalOverlay.classList.remove( 'open' ); };
+				modalOverlay.querySelector( '.cf7sb-modal-cancel' ).addEventListener( 'click', close );
+				modalOverlay.addEventListener( 'click', function ( e ) {
+					if ( e.target === modalOverlay ) { close(); }
+				} );
+				document.addEventListener( 'keydown', function ( e ) {
+					if ( 'Escape' === e.key && modalOverlay.classList.contains( 'open' ) ) { close(); }
+				} );
+				modalOverlay.querySelector( '.cf7sb-modal-add' ).addEventListener( 'click', function () {
+					var lines = splitLines( modalInput.value );
+					if ( lines.length && modalOnAdd ) {
+						modalOnAdd( lines );
+					}
+					close();
+				} );
+			}
+
+			function openModal( label, onAdd ) {
+				ensureModal();
+				modalOnAdd = onAdd;
+				modalTitle.textContent = label + ' を追加';
+				modalInput.value = '';
+				modalOverlay.classList.add( 'open' );
+				modalInput.focus();
+			}
+
+			function initTagList( source ) {
+				var editable = ! source.disabled;
+				var label = source.getAttribute( 'data-cf7sb-label' ) || '';
+				var wrap = document.createElement( 'div' );
+				wrap.className = 'cf7sb-tags';
+				source.parentNode.insertBefore( wrap, source );
+				source.style.display = 'none';
+
+				var values = function () { return splitLines( source.value ); };
+				var sync = function ( list ) {
+					source.value = list.join( '\n' );
+					// 変更検知（保存ボタンの活性化）を通常入力と同じ経路で発火させる
+					source.dispatchEvent( new Event( 'input', { bubbles: true } ) );
+					rebuild();
+				};
+				var rebuild = function () {
+					wrap.innerHTML = '';
+					var list = values();
+					list.forEach( function ( value, index ) {
+						var tag = document.createElement( 'span' );
+						tag.className = 'cf7sb-tag';
+						var text = document.createElement( 'span' );
+						text.textContent = value;
+						tag.appendChild( text );
+						if ( editable ) {
+							var del = document.createElement( 'button' );
+							del.type = 'button';
+							del.className = 'cf7sb-tag-x';
+							del.setAttribute( 'aria-label', '「' + value + '」を削除' );
+							del.textContent = '×';
+							del.addEventListener( 'click', function () {
+								var current = values();
+								current.splice( index, 1 );
+								sync( current );
+							} );
+							tag.appendChild( del );
+						}
+						wrap.appendChild( tag );
+					} );
+					if ( ! list.length ) {
+						var empty = document.createElement( 'span' );
+						empty.className = 'cf7sb-tags-empty';
+						empty.textContent = '登録なし';
+						wrap.appendChild( empty );
+					}
+					if ( editable ) {
+						var add = document.createElement( 'button' );
+						add.type = 'button';
+						add.className = 'button cf7sb-tag-add';
+						add.textContent = '＋ 追加する';
+						add.addEventListener( 'click', function () {
+							openModal( label, function ( lines ) {
+								var current = values();
+								lines.forEach( function ( value ) {
+									if ( -1 === current.indexOf( value ) ) {
+										current.push( value );
+									}
+								} );
+								sync( current );
+							} );
+						} );
+						wrap.appendChild( add );
+					}
+				};
+				rebuild();
+			}
+
+			document.querySelectorAll( 'textarea.cf7sb-taglist' ).forEach( initTagList );
 
 			// ブロック設定: 変更がない間は保存ボタンを押せなくする
 			var blForm = document.getElementById( 'cf7sb_blocklist_form' );

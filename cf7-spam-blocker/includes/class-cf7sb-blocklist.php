@@ -46,17 +46,31 @@ class CF7SB_Blocklist {
 		return isset( $settings[ $name ] ) ? $settings[ $name ] : '';
 	}
 
+	/** 取得済みリストをこの秒数まで新鮮とみなす（超えたら次の判定時に自動再取得） */
+	const FRESH_TTL = 60;
+
+	/** このリクエスト内で鮮度確認を済ませたか */
+	private static $freshness_checked = false;
+
 	/**
-	 * 検証に使うリストを返す。キャッシュ（option）優先、未取得ならその場で取得を試みる。
+	 * 検証に使うリストを返す。
+	 * どこかのサイトでリストが変更されてもすぐ反映されるよう、TTLを超えていたら
+	 * その場で中央サーバーから再取得する（TTL内・取得失敗時はキャッシュで動作）。
 	 *
 	 * @return array{domains: string[], keywords: string[]}
 	 */
 	public static function get() {
 		$stored = get_option( self::OPTION_LIST, array() );
 
-		if ( empty( $stored['fetched_at'] ) && self::get_setting( 'url' ) ) {
-			self::refresh();
-			$stored = get_option( self::OPTION_LIST, array() );
+		if ( ! self::$freshness_checked && self::get_setting( 'url' ) ) {
+			self::$freshness_checked = true;
+			$checked_at = ! empty( $stored['checked_at'] )
+				? (int) $stored['checked_at']
+				: ( ! empty( $stored['fetched_at'] ) ? (int) $stored['fetched_at'] : 0 );
+			if ( time() - $checked_at > self::FRESH_TTL ) {
+				self::refresh();
+				$stored = get_option( self::OPTION_LIST, array() );
+			}
 		}
 
 		return array(
@@ -93,6 +107,7 @@ class CF7SB_Blocklist {
 		$stored['message']    = trim( wp_strip_all_tags( (string) $message ) );
 		$stored['block_uuid'] = (bool) $block_uuid;
 		$stored['fetched_at'] = time();
+		$stored['checked_at'] = time();
 		$stored['error']      = '';
 		update_option( self::OPTION_LIST, $stored, false );
 	}
@@ -127,8 +142,9 @@ class CF7SB_Blocklist {
 	}
 
 	private static function store_error( $error ) {
-		$stored          = get_option( self::OPTION_LIST, array() );
-		$stored['error'] = $error;
+		$stored               = get_option( self::OPTION_LIST, array() );
+		$stored['error']      = $error;
+		$stored['checked_at'] = time(); // 失敗時もTTLの間は再試行しない（送信を遅くしないため）
 		update_option( self::OPTION_LIST, $stored, false );
 		return new WP_Error( 'cf7sb_fetch_failed', $error );
 	}
@@ -178,7 +194,7 @@ class CF7SB_Blocklist {
 			isset( $data['emails'] ) ? $data['emails'] : array(),
 			isset( $data['message'] ) ? $data['message'] : '',
 			isset( $data['patterns'] ) ? $data['patterns'] : array(),
-				isset( $data['block_uuid'] ) ? (bool) $data['block_uuid'] : true
+			isset( $data['block_uuid'] ) ? (bool) $data['block_uuid'] : true
 		);
 		return true;
 	}
@@ -215,13 +231,12 @@ class CF7SB_Blocklist {
 				return new WP_Error( 'cf7sb_push_failed', '秘密キーが一致しません。' );
 			}
 			$saved = CF7SB_Server::save_list( $server_list, array(
-				'domains'  => $clean_domains,
-				'emails'   => $clean_emails,
-				'keywords' => $clean_keywords,
-				'patterns' => $clean_patterns,
-			'block_uuid' => $block_uuid,
+				'domains'    => $clean_domains,
+				'emails'     => $clean_emails,
+				'keywords'   => $clean_keywords,
+				'patterns'   => $clean_patterns,
 				'block_uuid' => $block_uuid,
-				'message'  => $clean_message,
+				'message'    => $clean_message,
 			) );
 			self::store_lists( $saved['domains'], $saved['keywords'], $saved['emails'], $saved['message'], $saved['patterns'], isset( $saved['block_uuid'] ) ? (bool) $saved['block_uuid'] : true );
 			return true;
