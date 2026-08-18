@@ -80,6 +80,7 @@ class CF7SB_Blocklist {
 			'patterns'   => isset( $stored['patterns'] ) ? (array) $stored['patterns'] : array(),
 			'message'    => isset( $stored['message'] ) ? (string) $stored['message'] : '',
 			'block_uuid' => isset( $stored['block_uuid'] ) ? (bool) $stored['block_uuid'] : true,
+			'block_link' => isset( $stored['block_link'] ) ? (bool) $stored['block_link'] : false,
 		);
 	}
 
@@ -98,7 +99,7 @@ class CF7SB_Blocklist {
 		return self::get_setting( 'message' );
 	}
 
-	private static function store_lists( $domains, $keywords, $emails = array(), $message = '', $patterns = array(), $block_uuid = true ) {
+	private static function store_lists( $domains, $keywords, $emails = array(), $message = '', $patterns = array(), $block_uuid = true, $block_link = false ) {
 		$stored               = get_option( self::OPTION_LIST, array() );
 		$stored['domains']    = self::sanitize_lines( $domains );
 		$stored['emails']     = self::sanitize_lines( $emails );
@@ -106,6 +107,7 @@ class CF7SB_Blocklist {
 		$stored['patterns']   = self::sanitize_patterns( $patterns );
 		$stored['message']    = trim( wp_strip_all_tags( (string) $message ) );
 		$stored['block_uuid'] = (bool) $block_uuid;
+		$stored['block_link'] = (bool) $block_link;
 		$stored['fetched_at'] = time();
 		$stored['checked_at'] = time();
 		$stored['error']      = '';
@@ -164,7 +166,7 @@ class CF7SB_Blocklist {
 		$server_list = CF7SB_Server::local_list_name( $url );
 		if ( null !== $server_list ) {
 			$data = CF7SB_Server::get_list( $server_list );
-			self::store_lists( $data['domains'], $data['keywords'], $data['emails'], $data['message'], $data['patterns'], $data['block_uuid'] );
+			self::store_lists( $data['domains'], $data['keywords'], $data['emails'], $data['message'], $data['patterns'], $data['block_uuid'], $data['block_link'] );
 			return true;
 		}
 
@@ -194,7 +196,8 @@ class CF7SB_Blocklist {
 			isset( $data['emails'] ) ? $data['emails'] : array(),
 			isset( $data['message'] ) ? $data['message'] : '',
 			isset( $data['patterns'] ) ? $data['patterns'] : array(),
-			isset( $data['block_uuid'] ) ? (bool) $data['block_uuid'] : true
+			isset( $data['block_uuid'] ) ? (bool) $data['block_uuid'] : true,
+			isset( $data['block_link'] ) ? (bool) $data['block_link'] : false
 		);
 		return true;
 	}
@@ -206,8 +209,9 @@ class CF7SB_Blocklist {
 	 * @param string[] $keywords
 	 * @return true|WP_Error
 	 */
-	public static function push( $domains, $keywords, $emails = array(), $message = '', $patterns = array(), $block_uuid = true ) {
+	public static function push( $domains, $keywords, $emails = array(), $message = '', $patterns = array(), $block_uuid = true, $block_link = false ) {
 		$block_uuid = (bool) $block_uuid;
+		$block_link = (bool) $block_link;
 		$url = self::get_setting( 'url' );
 		$key = self::get_setting( 'key' );
 
@@ -236,9 +240,11 @@ class CF7SB_Blocklist {
 				'keywords'   => $clean_keywords,
 				'patterns'   => $clean_patterns,
 				'block_uuid' => $block_uuid,
+			'block_link' => $block_link,
+				'block_link' => $block_link,
 				'message'    => $clean_message,
 			) );
-			self::store_lists( $saved['domains'], $saved['keywords'], $saved['emails'], $saved['message'], $saved['patterns'], isset( $saved['block_uuid'] ) ? (bool) $saved['block_uuid'] : true );
+			self::store_lists( $saved['domains'], $saved['keywords'], $saved['emails'], $saved['message'], $saved['patterns'], isset( $saved['block_uuid'] ) ? (bool) $saved['block_uuid'] : true, isset( $saved['block_link'] ) ? (bool) $saved['block_link'] : false );
 			return true;
 		}
 
@@ -248,6 +254,7 @@ class CF7SB_Blocklist {
 			'keywords' => $clean_keywords,
 			'patterns' => $clean_patterns,
 			'block_uuid' => $block_uuid,
+			'block_link' => $block_link,
 			'message'  => $clean_message,
 		) );
 
@@ -283,10 +290,11 @@ class CF7SB_Blocklist {
 				isset( $saved['emails'] ) ? $saved['emails'] : array(),
 				isset( $saved['message'] ) ? $saved['message'] : $clean_message,
 				isset( $saved['patterns'] ) ? $saved['patterns'] : $clean_patterns,
-				isset( $saved['block_uuid'] ) ? (bool) $saved['block_uuid'] : $block_uuid
+				isset( $saved['block_uuid'] ) ? (bool) $saved['block_uuid'] : $block_uuid,
+				isset( $saved['block_link'] ) ? (bool) $saved['block_link'] : $block_link
 			);
 		} else {
-			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message, $clean_patterns, $block_uuid );
+			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message, $clean_patterns, $block_uuid, $block_link );
 		}
 		return true;
 	}

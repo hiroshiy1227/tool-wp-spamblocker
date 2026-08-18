@@ -99,6 +99,7 @@ class CF7SB_Server {
 			'patterns'   => isset( $list['patterns'] ) ? (array) $list['patterns'] : array(),
 			'message'    => isset( $list['message'] ) ? (string) $list['message'] : '',
 			'block_uuid' => isset( $list['block_uuid'] ) ? (bool) $list['block_uuid'] : true,
+			'block_link' => isset( $list['block_link'] ) ? (bool) $list['block_link'] : false,
 			'updated'    => isset( $list['updated'] ) ? $list['updated'] : null,
 		);
 	}
@@ -114,6 +115,7 @@ class CF7SB_Server {
 			'keywords' => CF7SB_Blocklist::sanitize_lines( isset( $data['keywords'] ) ? $data['keywords'] : array() ),
 			'patterns' => CF7SB_Blocklist::sanitize_patterns( isset( $data['patterns'] ) ? $data['patterns'] : array() ),
 			'block_uuid' => isset( $data['block_uuid'] ) ? (bool) $data['block_uuid'] : true,
+			'block_link' => isset( $data['block_link'] ) ? (bool) $data['block_link'] : false,
 			'message'  => isset( $data['message'] ) && is_string( $data['message'] )
 				? mb_substr( trim( wp_strip_all_tags( $data['message'] ) ), 0, 500 )
 				: '',

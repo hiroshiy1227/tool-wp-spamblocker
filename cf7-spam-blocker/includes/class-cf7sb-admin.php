@@ -95,8 +95,9 @@ class CF7SB_Admin {
 			$message_text = '迷惑行為と判定されたため送信を拒否しました。';
 		}
 		$block_uuid = ! empty( $_POST['cf7sb_block_uuid'] );
+		$block_link = ! empty( $_POST['cf7sb_block_link'] );
 
-		$pending = array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'patterns' => $patterns_text, 'message' => $message_text, 'block_uuid' => $block_uuid );
+		$pending = array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'patterns' => $patterns_text, 'message' => $message_text, 'block_uuid' => $block_uuid, 'block_link' => $block_link );
 
 		// 正規表現として不正なパターンは保存前に弾いて知らせる（黙って消さない）
 		$invalid_patterns = array();
@@ -118,7 +119,8 @@ class CF7SB_Admin {
 			self::textarea_to_array( $emails_text ),
 			$message_text,
 			preg_split( '/\r\n|\r|\n/', $patterns_text ),
-			$block_uuid
+			$block_uuid,
+			$block_link
 		);
 		if ( is_wp_error( $pushed ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $pushed->get_error_message(), MINUTE_IN_SECONDS );
@@ -457,6 +459,15 @@ class CF7SB_Admin {
 								UUID形式の管理番号をブロックする（推奨・全サイト共通）
 							</label>
 							<p class="description">「管理番号: 08ffb4e6-9d35-4f9e-b173-…」のような <code>8桁-4桁-4桁-4桁-12桁</code> の英数字IDが本文などに含まれる送信を拒否します。この形式のIDが正当な問い合わせに現れることはまずありません。</p>
+							<label style="display:block; margin-top:0.8em;">
+								<input type="checkbox" name="cf7sb_block_link" value="1"
+									<?php checked( $list['block_link'] ); ?> <?php disabled( ! $can_edit ); ?>>
+								相互リンクフィルター（リンク設置依頼の営業メールをブロック・全サイト共通）
+							</label>
+							<p class="description">
+								「相互リンク」等の依頼用語（+2点）に加え、リンク設置の言い回し・本文中のURL・「突然のご連絡」等の営業定型句・DRやSEO等の用語（各+1点）をスコア化し、<strong>合計3点以上</strong>の送信だけを拒否します。<br>
+								キーワード単体では判定しないため、本文にたまたま「相互リンク」と書かれただけの正当な問い合わせ（URLや営業定型句がないもの）はブロックされません。
+							</p>
 						</td>
 					</tr>
 					<tr>

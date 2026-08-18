@@ -177,7 +177,50 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 				return true;
 			}
 		}
+		if ( ! empty( $list['block_link'] ) && self::is_link_exchange_value( $value ) ) {
+			return true;
+		}
 		return self::matches_pattern( $value );
+	}
+
+	/**
+	 * 相互リンクフィルター: リンク設置依頼の営業メールかをスコアで判定する。
+	 *
+	 * キーワード単体では判定せず、複数のシグナルを組み合わせて誤ブロックを防ぐ。
+	 *   +2: 相互リンク・発リンク・被リンク・dofollow などの依頼用語（強いシグナル）
+	 *   +1: 「リンクを設置／掲載／追加」「アンカーテキスト」などの依頼の言い回し
+	 *   +1: 本文にURL（営業メールは自社サイトのURLをほぼ必ず載せてくる）
+	 *   +1: 「突然のご連絡」「唐突なご連絡」などの営業定型の導入句
+	 *   +1: DR・ドメイン評価・SEO などの検索評価用語
+	 * 合計3点以上でブロック。「相互リンク」という語が本文に偶然含まれるだけの
+	 * 正当な問い合わせ（URLも営業定型句もない）は2点止まりで通過する。
+	 */
+	public static function link_exchange_score( $value ) {
+		$value = (string) $value;
+		if ( '' === $value ) {
+			return 0;
+		}
+		$score = 0;
+		if ( preg_match( '/相互\s*リンク|発リンク|被リンク|dofollow|nofollow/iu', $value ) ) {
+			$score += 2;
+		}
+		if ( preg_match( '/リンク(を|の)?(設置|掲載|追加)|アンカーテキスト/u', $value ) ) {
+			$score += 1;
+		}
+		if ( preg_match( '#https?://#i', $value ) ) {
+			$score += 1;
+		}
+		if ( preg_match( '/(突然|唐突)の(ご)?(連絡|メール)/u', $value ) ) {
+			$score += 1;
+		}
+		if ( preg_match( '/ドメイン(評価|パワー|レーティング)|(^|[^a-z])DR([^a-z]|$)|SEO|検索順位|サイト集客/iu', $value ) ) {
+			$score += 1;
+		}
+		return $score;
+	}
+
+	public static function is_link_exchange_value( $value ) {
+		return self::link_exchange_score( $value ) >= 3;
 	}
 
 	/**
