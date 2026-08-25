@@ -19,6 +19,7 @@ class CF7SB_Admin {
 		add_action( 'admin_post_cf7sb_enable_server', array( __CLASS__, 'handle_enable_server' ) );
 		add_action( 'admin_post_cf7sb_disable_server', array( __CLASS__, 'handle_disable_server' ) );
 		add_action( 'admin_post_cf7sb_clear_logs', array( __CLASS__, 'handle_clear_logs' ) );
+		add_action( 'admin_post_cf7sb_remove_site', array( __CLASS__, 'handle_remove_site' ) );
 		add_action( 'admin_notices', array( __CLASS__, 'notices' ) );
 	}
 
@@ -151,6 +152,22 @@ class CF7SB_Admin {
 		self::redirect_back( 'logs_cleared', 'log' );
 	}
 
+	public static function handle_remove_site() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( '権限がありません。' );
+		}
+		check_admin_referer( 'cf7sb_remove_site' );
+
+		$id      = isset( $_POST['site_id'] ) ? sanitize_text_field( wp_unslash( $_POST['site_id'] ) ) : '';
+		$removed = CF7SB_Blocklist::remove_site( $id );
+		if ( is_wp_error( $removed ) ) {
+			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $removed->get_error_message(), MINUTE_IN_SECONDS );
+			self::redirect_back( 'site_remove_failed', 'sites' );
+		}
+
+		self::redirect_back( 'site_removed', 'sites' );
+	}
+
 	public static function handle_refresh() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( '権限がありません。' );
@@ -239,6 +256,8 @@ class CF7SB_Admin {
 			'server_enabled'  => array( 'success', 'このサイトを中央サーバーにしました。他のサイトは、下の「セットアップコード」を貼り付けるだけで接続できます。' ),
 			'server_disabled' => array( 'success', '中央サーバー機能を停止しました（保存済みのリストデータは残っています）。' ),
 			'logs_cleared'    => array( 'success', 'ブロックログを消去しました。' ),
+			'site_removed'    => array( 'success', 'サイトの記録を削除しました（そのサイトが次にリストを取得すると再び表示されます）。' ),
+			'site_remove_failed' => array( 'error', 'サイトの記録を削除できませんでした。' . ( $error ? '（' . $error . '）' : '' ) ),
 			'logs_clear_failed' => array( 'error', 'ブロックログを消去できませんでした。' . ( $error ? '（' . $error . '）' : '' ) ),
 			'push_failed'     => array( 'error', 'ブロックリストの保存に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
 			'code_invalid'    => array( 'error', 'セットアップコードを読み取れませんでした。コピー元のサイトで表示されたコードを、そのまま全部貼り付けてください。' ),
@@ -265,7 +284,7 @@ class CF7SB_Admin {
 
 		// 表示するタブ（未指定時は、未設定サイトならセットアップ、設定済みならブロック設定）
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
-		if ( ! in_array( $tab, array( 'setup', 'connection', 'blocklist', 'log' ), true ) ) {
+		if ( ! in_array( $tab, array( 'setup', 'connection', 'blocklist', 'log', 'sites' ), true ) ) {
 			$tab = ( '' === $settings['url'] ) ? 'setup' : 'blocklist';
 		}
 
@@ -313,6 +332,7 @@ class CF7SB_Admin {
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'connection', $base_url ) ); ?>" class="nav-tab <?php echo 'connection' === $tab ? 'nav-tab-active' : ''; ?>">接続設定</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'blocklist', $base_url ) ); ?>" class="nav-tab <?php echo 'blocklist' === $tab ? 'nav-tab-active' : ''; ?>">ブロック設定</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'log', $base_url ) ); ?>" class="nav-tab <?php echo 'log' === $tab ? 'nav-tab-active' : ''; ?>">ブロックログ</a>
+				<a href="<?php echo esc_url( add_query_arg( 'tab', 'sites', $base_url ) ); ?>" class="nav-tab <?php echo 'sites' === $tab ? 'nav-tab-active' : ''; ?>">接続サイト</a>
 			</h2>
 
 			<?php if ( 'setup' === $tab ) : ?>
@@ -580,6 +600,78 @@ class CF7SB_Admin {
 						<button type="submit" class="button button-link-delete" onclick="return confirm('ブロックログをすべて消去しますか？（全サイト共通のログです）');">ログをすべて消去する</button>
 					</form>
 				<?php endif; ?>
+			<?php endif; ?>
+
+			<?php
+			if ( 'sites' === $tab ) :
+				$site_data = CF7SB_Blocklist::fetch_sites();
+				$latest_ver = '';
+				foreach ( $site_data['sites'] as $s ) {
+					if ( '' === $latest_ver || version_compare( $s['version'], $latest_ver, '>' ) ) {
+						$latest_ver = $s['version'];
+					}
+				}
+			?>
+				<p>
+					このブロックリストを共有しているサイトの一覧です（<?php echo count( $site_data['sites'] ); ?> サイト）。
+					各サイトがリストを取得したときに自動で記録されます（通常1時間ごと）。
+				</p>
+
+				<?php if ( ! empty( $site_data['error'] ) ) : ?>
+					<div class="notice notice-error inline"><p>サイト一覧を取得できませんでした。（<?php echo esc_html( $site_data['error'] ); ?>）</p></div>
+				<?php endif; ?>
+
+				<table class="widefat striped">
+					<thead>
+						<tr>
+							<th style="width:200px;">サイト名</th>
+							<th>URL</th>
+							<th style="width:110px;">役割</th>
+							<th style="width:120px;">バージョン</th>
+							<th style="width:150px;">最終確認</th>
+							<th style="width:90px;"></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php if ( empty( $site_data['sites'] ) ) : ?>
+							<tr><td colspan="6">まだ記録がありません。各サイトの「ブロック設定」タブを開くか、1時間ほど待つと表示されます。</td></tr>
+						<?php else : ?>
+							<?php foreach ( $site_data['sites'] as $site ) : ?>
+								<tr>
+									<td><strong><?php echo esc_html( $site['name'] ); ?></strong></td>
+									<td style="word-break:break-all;"><a href="<?php echo esc_url( $site['url'] ); ?>" target="_blank" rel="noopener"><?php echo esc_html( $site['url'] ); ?></a></td>
+									<td>
+										<?php if ( 'central' === $site['role'] ) : ?>
+											<span class="dashicons dashicons-shield" style="color:#00a32a; vertical-align:text-bottom;"></span> 中央サーバー
+										<?php else : ?>
+											接続サイト
+										<?php endif; ?>
+									</td>
+									<td>
+										<?php echo esc_html( $site['version'] ); ?>
+										<?php if ( $latest_ver && version_compare( $site['version'], $latest_ver, '<' ) ) : ?>
+											<span style="color:#b32d2e;">（要更新）</span>
+										<?php endif; ?>
+									</td>
+									<td><?php echo esc_html( wp_date( 'Y-m-d H:i', (int) $site['last_seen'] ) ); ?></td>
+									<td>
+										<?php if ( 'central' !== $site['role'] ) : ?>
+											<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin:0;">
+												<?php wp_nonce_field( 'cf7sb_remove_site' ); ?>
+												<input type="hidden" name="action" value="cf7sb_remove_site">
+												<input type="hidden" name="site_id" value="<?php echo esc_attr( $site['id'] ); ?>">
+												<button type="submit" class="button-link button-link-delete" onclick="return confirm('この記録を削除しますか？（相手サイトの設定は変わりません）');">記録を削除</button>
+											</form>
+										<?php endif; ?>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						<?php endif; ?>
+					</tbody>
+				</table>
+				<p class="description" style="margin-top:0.8em;">
+					「記録を削除」は一覧からこのサイトの記録を消すだけです（運用をやめたサイトの整理用）。そのサイトでプラグインが動いていれば、次回の取得時に再び表示されます。
+				</p>
 			<?php endif; ?>
 		</div>
 		<style>

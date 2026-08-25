@@ -163,6 +163,72 @@ class CF7SB_Server {
 		return self::sanitize_list_name( isset( $args['list'] ) ? $args['list'] : 'default' );
 	}
 
+	/** 接続サイト一覧の保存先と保持件数 */
+	const OPTION_SITES = 'cf7sb_server_sites';
+	const MAX_SITES    = 100;
+
+	/**
+	 * リストを取得しにきたサイトを記録する（プラグイン導入サイトの一覧用）。
+	 * サイトURLをキーにするため、同じサイトからの再取得では最終確認日時が更新される。
+	 */
+	public static function record_site( $args ) {
+		$url = isset( $args['url'] ) ? esc_url_raw( (string) $args['url'] ) : '';
+		if ( '' === $url ) {
+			return false;
+		}
+
+		$sites = get_option( self::OPTION_SITES, array() );
+		$id    = md5( untrailingslashit( strtolower( $url ) ) );
+
+		$sites[ $id ] = array(
+			'url'       => $url,
+			'name'      => mb_substr( sanitize_text_field( (string) ( isset( $args['name'] ) ? $args['name'] : '' ) ), 0, 100 ),
+			'version'   => preg_replace( '/[^0-9.]/', '', (string) ( isset( $args['version'] ) ? $args['version'] : '' ) ),
+			'list'      => self::sanitize_list_name( isset( $args['list'] ) ? $args['list'] : 'default' ),
+			'role'      => ( isset( $args['role'] ) && 'central' === $args['role'] ) ? 'central' : 'client',
+			'last_seen' => time(),
+		);
+
+		// 古い記録から溢れさせる（最終確認が新しい順に保持）
+		if ( count( $sites ) > self::MAX_SITES ) {
+			uasort( $sites, function ( $a, $b ) {
+				return $b['last_seen'] <=> $a['last_seen'];
+			} );
+			$sites = array_slice( $sites, 0, self::MAX_SITES, true );
+		}
+
+		update_option( self::OPTION_SITES, $sites, false );
+		return true;
+	}
+
+	/**
+	 * 接続サイト一覧（最終確認が新しい順）。
+	 */
+	public static function get_sites() {
+		$sites = get_option( self::OPTION_SITES, array() );
+		if ( ! is_array( $sites ) ) {
+			return array();
+		}
+		uasort( $sites, function ( $a, $b ) {
+			// 中央サーバーを先頭に、あとは最終確認が新しい順
+			if ( ( 'central' === $a['role'] ) !== ( 'central' === $b['role'] ) ) {
+				return ( 'central' === $a['role'] ) ? -1 : 1;
+			}
+			return $b['last_seen'] <=> $a['last_seen'];
+		} );
+		foreach ( $sites as $id => $site ) {
+			$sites[ $id ]['id'] = $id;
+		}
+		return array_values( $sites );
+	}
+
+	public static function remove_site( $id ) {
+		$sites = get_option( self::OPTION_SITES, array() );
+		unset( $sites[ (string) $id ] );
+		update_option( self::OPTION_SITES, $sites, false );
+		return true;
+	}
+
 	/** ブロックログの保存先と保持件数（リストごと） */
 	const OPTION_LOGS = 'cf7sb_server_logs';
 	const MAX_LOGS    = 500;
@@ -278,6 +344,41 @@ class CF7SB_Server {
 				),
 			)
 		);
+		register_rest_route(
+			'cf7sb/v1',
+			'/sites',
+			array(
+				array(
+					'methods'             => 'GET',
+					'callback'            => array( __CLASS__, 'handle_sites_get' ),
+					'permission_callback' => '__return_true',
+				),
+				array(
+					'methods'             => 'DELETE',
+					'callback'            => array( __CLASS__, 'handle_sites_delete' ),
+					'permission_callback' => '__return_true',
+				),
+			)
+		);
+	}
+
+	public static function handle_sites_get( $request ) {
+		$allowed = self::check_key( $request );
+		if ( is_wp_error( $allowed ) ) {
+			return $allowed;
+		}
+		$response = rest_ensure_response( array( 'sites' => self::get_sites() ) );
+		$response->header( 'Cache-Control', 'no-store' );
+		return $response;
+	}
+
+	public static function handle_sites_delete( $request ) {
+		$allowed = self::check_key( $request );
+		if ( is_wp_error( $allowed ) ) {
+			return $allowed;
+		}
+		self::remove_site( $request->get_param( 'id' ) );
+		return rest_ensure_response( array( 'removed' => true ) );
 	}
 
 	/**
@@ -328,6 +429,19 @@ class CF7SB_Server {
 	}
 
 	public static function handle_get( $request ) {
+		// 秘密キーが一致する取得元は、接続サイトとして記録する（追加のリクエストは不要）
+		$key      = self::get_key();
+		$sent_key = (string) $request->get_header( 'X-CF7SB-Key' );
+		if ( '' !== $key && hash_equals( $key, $sent_key ) && $request->get_param( 'site_url' ) ) {
+			self::record_site( array(
+				'url'     => $request->get_param( 'site_url' ),
+				'name'    => $request->get_param( 'site_name' ),
+				'version' => $request->get_param( 'ver' ),
+				'list'    => $request->get_param( 'list' ),
+				'role'    => 'client',
+			) );
+		}
+
 		$response = rest_ensure_response( self::get_list( $request->get_param( 'list' ) ) );
 		$response->header( 'Cache-Control', 'no-store' );
 		return $response;

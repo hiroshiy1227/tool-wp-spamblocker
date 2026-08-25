@@ -165,12 +165,30 @@ class CF7SB_Blocklist {
 		// このサイト自身が中央サーバー（かんたんセットアップ方式）なら直接読む
 		$server_list = CF7SB_Server::local_list_name( $url );
 		if ( null !== $server_list ) {
+			CF7SB_Server::record_site( array(
+				'url'     => home_url(),
+				'name'    => get_bloginfo( 'name' ),
+				'version' => CF7SB_VERSION,
+				'list'    => $server_list,
+				'role'    => 'central',
+			) );
 			$data = CF7SB_Server::get_list( $server_list );
 			self::store_lists( $data['domains'], $data['keywords'], $data['emails'], $data['message'], $data['patterns'], $data['block_uuid'], $data['block_link'] );
 			return true;
 		}
 
-		$response = wp_remote_get( $url, array( 'timeout' => 10 ) );
+		// 取得のついでに、このサイトの情報を中央サーバーへ知らせる（接続サイト一覧用）
+		$key         = self::get_setting( 'key' );
+		$request_url = add_query_arg( array(
+			'site_url'  => home_url(),
+			'site_name' => get_bloginfo( 'name' ),
+			'ver'       => CF7SB_VERSION,
+		), $url );
+
+		$response = wp_remote_get( $request_url, array(
+			'timeout' => 10,
+			'headers' => $key ? array( 'X-CF7SB-Key' => $key ) : array(),
+		) );
 
 		if ( is_wp_error( $response ) ) {
 			return self::store_error( $response->get_error_message() );
@@ -420,6 +438,84 @@ class CF7SB_Blocklist {
 		if ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
 			$data = json_decode( wp_remote_retrieve_body( $response ), true );
 			return new WP_Error( 'cf7sb_clear_failed', ( is_array( $data ) && ! empty( $data['message'] ) ) ? $data['message'] : 'ログを消去できませんでした。' );
+		}
+		return true;
+	}
+
+	/**
+	 * 中央サーバーから接続サイト一覧を取得する。
+	 *
+	 * @return array{sites: array, error: string}
+	 */
+	public static function fetch_sites() {
+		$url = self::get_setting( 'url' );
+		$key = self::get_setting( 'key' );
+		if ( ! $url ) {
+			return array( 'sites' => array(), 'error' => 'ブロックリストURLが設定されていません。' );
+		}
+
+		$server_list = CF7SB_Server::local_list_name( $url );
+		if ( null !== $server_list ) {
+			return array( 'sites' => CF7SB_Server::get_sites(), 'error' => '' );
+		}
+
+		if ( ! $key ) {
+			return array( 'sites' => array(), 'error' => 'サイト一覧の閲覧には秘密キーが必要です。' );
+		}
+		$sites_url = self::endpoint_url( $url, 'sites' );
+		if ( ! $sites_url ) {
+			return array( 'sites' => array(), 'error' => 'サイト一覧用URLを組み立てられませんでした。' );
+		}
+
+		$response = wp_remote_get( $sites_url, array(
+			'timeout' => 10,
+			'headers' => array( 'X-CF7SB-Key' => $key ),
+		) );
+		if ( is_wp_error( $response ) ) {
+			return array( 'sites' => array(), 'error' => $response->get_error_message() );
+		}
+		$code = wp_remote_retrieve_response_code( $response );
+		$data = json_decode( wp_remote_retrieve_body( $response ), true );
+		if ( 200 !== $code || ! is_array( $data ) || ! isset( $data['sites'] ) ) {
+			$reason = ( is_array( $data ) && ! empty( $data['message'] ) ) ? $data['message'] : 'HTTP ' . $code;
+			return array( 'sites' => array(), 'error' => $reason );
+		}
+
+		return array( 'sites' => (array) $data['sites'], 'error' => '' );
+	}
+
+	/**
+	 * 接続サイト一覧から1件削除する（記録の削除のみ。相手サイトには影響しない）。
+	 *
+	 * @return true|WP_Error
+	 */
+	public static function remove_site( $id ) {
+		$url = self::get_setting( 'url' );
+		$key = self::get_setting( 'key' );
+		if ( ! $url || ! $key ) {
+			return new WP_Error( 'cf7sb_no_key', 'サイト記録の削除には接続設定と秘密キーが必要です。' );
+		}
+
+		$server_list = CF7SB_Server::local_list_name( $url );
+		if ( null !== $server_list ) {
+			CF7SB_Server::remove_site( $id );
+			return true;
+		}
+
+		$sites_url = self::endpoint_url( $url, 'sites' );
+		if ( ! $sites_url ) {
+			return new WP_Error( 'cf7sb_no_url', 'サイト一覧用URLを組み立てられませんでした。' );
+		}
+		$response = wp_remote_request( add_query_arg( 'id', $id, $sites_url ), array(
+			'method'  => 'DELETE',
+			'timeout' => 10,
+			'headers' => array( 'X-CF7SB-Key' => $key ),
+		) );
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+		if ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
+			return new WP_Error( 'cf7sb_remove_failed', 'サイト記録を削除できませんでした。' );
 		}
 		return true;
 	}
