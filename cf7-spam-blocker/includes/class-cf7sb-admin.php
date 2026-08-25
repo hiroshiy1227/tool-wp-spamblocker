@@ -624,8 +624,8 @@ class CF7SB_Admin {
 				<table class="widefat striped">
 					<thead>
 						<tr>
-							<th style="width:200px;">サイト名</th>
-							<th>URL</th>
+							<th style="width:34%;">サイト名</th>
+							<th style="width:26%;">URL</th>
 							<th style="width:110px;">役割</th>
 							<th style="width:120px;">バージョン</th>
 							<th style="width:150px;">最終確認</th>
