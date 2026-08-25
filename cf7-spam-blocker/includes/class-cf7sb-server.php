@@ -163,6 +163,79 @@ class CF7SB_Server {
 		return self::sanitize_list_name( isset( $args['list'] ) ? $args['list'] : 'default' );
 	}
 
+	/** ブロックログの保存先と保持件数（リストごと） */
+	const OPTION_LOGS = 'cf7sb_server_logs';
+	const MAX_LOGS    = 500;
+
+	/**
+	 * ログ1件を正規化する（保存する情報を限定し、長さも制限する）。
+	 */
+	private static function sanitize_log_entry( $entry ) {
+		$text = function ( $value, $length ) {
+			return mb_substr( trim( wp_strip_all_tags( (string) $value ) ), 0, $length );
+		};
+		return array(
+			'time'    => isset( $entry['time'] ) ? (int) $entry['time'] : time(),
+			'site'    => $text( isset( $entry['site'] ) ? $entry['site'] : '', 100 ),
+			'form'    => $text( isset( $entry['form'] ) ? $entry['form'] : '', 100 ),
+			'rule'    => preg_replace( '/[^a-z_]/', '', (string) ( isset( $entry['rule'] ) ? $entry['rule'] : '' ) ),
+			'matched' => $text( isset( $entry['matched'] ) ? $entry['matched'] : '', 200 ),
+			'field'   => $text( isset( $entry['field'] ) ? $entry['field'] : '', 100 ),
+			'email'   => $text( isset( $entry['email'] ) ? $entry['email'] : '', 200 ),
+			'excerpt' => $text( isset( $entry['excerpt'] ) ? $entry['excerpt'] : '', 400 ),
+			'ip'      => $text( isset( $entry['ip'] ) ? $entry['ip'] : '', 45 ),
+		);
+	}
+
+	/**
+	 * ブロックログを1件追加する（新しいものが先頭）。
+	 */
+	public static function add_log( $name, $entry ) {
+		$name = self::sanitize_list_name( $name );
+		$logs = get_option( self::OPTION_LOGS, array() );
+		$list = ( isset( $logs[ $name ] ) && is_array( $logs[ $name ] ) ) ? $logs[ $name ] : array();
+
+		array_unshift( $list, self::sanitize_log_entry( $entry ) );
+		if ( count( $list ) > self::MAX_LOGS ) {
+			$list = array_slice( $list, 0, self::MAX_LOGS );
+		}
+
+		$logs[ $name ] = $list;
+		update_option( self::OPTION_LOGS, $logs, false );
+		return true;
+	}
+
+	/**
+	 * @return array{logs: array, total: int, counts: array}
+	 */
+	public static function get_logs( $name, $limit = 100 ) {
+		$name = self::sanitize_list_name( $name );
+		$logs = get_option( self::OPTION_LOGS, array() );
+		$list = ( isset( $logs[ $name ] ) && is_array( $logs[ $name ] ) ) ? $logs[ $name ] : array();
+
+		// 理由別の内訳（保存されている全件が対象）
+		$counts = array();
+		foreach ( $list as $row ) {
+			$rule            = isset( $row['rule'] ) ? $row['rule'] : '';
+			$counts[ $rule ] = isset( $counts[ $rule ] ) ? $counts[ $rule ] + 1 : 1;
+		}
+		arsort( $counts );
+
+		return array(
+			'logs'   => array_slice( $list, 0, max( 1, (int) $limit ) ),
+			'total'  => count( $list ),
+			'counts' => $counts,
+		);
+	}
+
+	public static function clear_logs( $name ) {
+		$name = self::sanitize_list_name( $name );
+		$logs = get_option( self::OPTION_LOGS, array() );
+		unset( $logs[ $name ] );
+		update_option( self::OPTION_LOGS, $logs, false );
+		return true;
+	}
+
 	public static function register_routes() {
 		if ( ! self::is_enabled() ) {
 			return;
@@ -183,6 +256,75 @@ class CF7SB_Server {
 				),
 			)
 		);
+		// ログは送信内容を含むため、閲覧・記録・消去のすべてに秘密キーを要求する
+		register_rest_route(
+			'cf7sb/v1',
+			'/log',
+			array(
+				array(
+					'methods'             => 'GET',
+					'callback'            => array( __CLASS__, 'handle_log_get' ),
+					'permission_callback' => '__return_true',
+				),
+				array(
+					'methods'             => 'POST',
+					'callback'            => array( __CLASS__, 'handle_log_post' ),
+					'permission_callback' => '__return_true',
+				),
+				array(
+					'methods'             => 'DELETE',
+					'callback'            => array( __CLASS__, 'handle_log_delete' ),
+					'permission_callback' => '__return_true',
+				),
+			)
+		);
+	}
+
+	/**
+	 * 秘密キーを照合する。一致しなければ WP_Error を返す。
+	 *
+	 * @return true|WP_Error
+	 */
+	private static function check_key( $request ) {
+		$sent_key = (string) $request->get_header( 'X-CF7SB-Key' );
+		$key      = self::get_key();
+		if ( '' === $key || ! hash_equals( $key, $sent_key ) ) {
+			return new WP_Error( 'cf7sb_forbidden', '秘密キーが一致しません。', array( 'status' => 403 ) );
+		}
+		return true;
+	}
+
+	public static function handle_log_get( $request ) {
+		$allowed = self::check_key( $request );
+		if ( is_wp_error( $allowed ) ) {
+			return $allowed;
+		}
+		$limit    = (int) $request->get_param( 'limit' );
+		$response = rest_ensure_response( self::get_logs( $request->get_param( 'list' ), $limit ? $limit : 100 ) );
+		$response->header( 'Cache-Control', 'no-store' );
+		return $response;
+	}
+
+	public static function handle_log_post( $request ) {
+		$allowed = self::check_key( $request );
+		if ( is_wp_error( $allowed ) ) {
+			return $allowed;
+		}
+		$data = $request->get_json_params();
+		if ( ! is_array( $data ) ) {
+			return new WP_Error( 'cf7sb_bad_request', 'JSONの解析に失敗しました。', array( 'status' => 400 ) );
+		}
+		self::add_log( $request->get_param( 'list' ), $data );
+		return rest_ensure_response( array( 'logged' => true ) );
+	}
+
+	public static function handle_log_delete( $request ) {
+		$allowed = self::check_key( $request );
+		if ( is_wp_error( $allowed ) ) {
+			return $allowed;
+		}
+		self::clear_logs( $request->get_param( 'list' ) );
+		return rest_ensure_response( array( 'cleared' => true ) );
 	}
 
 	public static function handle_get( $request ) {

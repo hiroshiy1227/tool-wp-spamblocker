@@ -300,6 +300,144 @@ class CF7SB_Blocklist {
 	}
 
 	/**
+	 * リスト配信URLから、同じ中央サーバーの別エンドポイントのURLを作る。
+	 * （パス形式・rest_route形式のどちらにも対応）
+	 */
+	private static function endpoint_url( $url, $endpoint ) {
+		return ( false !== strpos( $url, 'cf7sb/v1/list' ) )
+			? str_replace( 'cf7sb/v1/list', 'cf7sb/v1/' . $endpoint, $url )
+			: '';
+	}
+
+	/**
+	 * ブロックした送信を中央サーバーのログに記録する（全サイトで共有）。
+	 */
+	public static function log_block( $entry ) {
+		$url = self::get_setting( 'url' );
+		$key = self::get_setting( 'key' );
+		if ( ! $url || ! $key ) {
+			return false;
+		}
+
+		$entry['time'] = time();
+		$entry['site'] = get_bloginfo( 'name' );
+
+		// このサイト自身が中央サーバーなら直接書く
+		$server_list = CF7SB_Server::local_list_name( $url );
+		if ( null !== $server_list ) {
+			return CF7SB_Server::add_log( $server_list, $entry );
+		}
+
+		$log_url = self::endpoint_url( $url, 'log' );
+		if ( ! $log_url ) {
+			return false;
+		}
+		wp_remote_post( $log_url, array(
+			'timeout' => 5,
+			'headers' => array(
+				'Content-Type' => 'application/json; charset=utf-8',
+				'X-CF7SB-Key'  => $key,
+			),
+			'body'    => wp_json_encode( $entry ),
+		) );
+		return true;
+	}
+
+	/**
+	 * 中央サーバーからブロックログを取得する。
+	 *
+	 * @return array{logs: array, total: int, counts: array, error: string}
+	 */
+	public static function fetch_logs( $limit = 100 ) {
+		$empty = array( 'logs' => array(), 'total' => 0, 'counts' => array(), 'error' => '' );
+
+		$url = self::get_setting( 'url' );
+		$key = self::get_setting( 'key' );
+		if ( ! $url ) {
+			return array_merge( $empty, array( 'error' => 'ブロックリストURLが設定されていません。' ) );
+		}
+
+		$server_list = CF7SB_Server::local_list_name( $url );
+		if ( null !== $server_list ) {
+			return array_merge( $empty, CF7SB_Server::get_logs( $server_list, $limit ) );
+		}
+
+		if ( ! $key ) {
+			return array_merge( $empty, array( 'error' => 'ログの閲覧には秘密キーが必要です。' ) );
+		}
+		$log_url = self::endpoint_url( $url, 'log' );
+		if ( ! $log_url ) {
+			return array_merge( $empty, array( 'error' => 'ログ用URLを組み立てられませんでした。' ) );
+		}
+
+		$response = wp_remote_get( add_query_arg( 'limit', (int) $limit, $log_url ), array(
+			'timeout' => 10,
+			'headers' => array( 'X-CF7SB-Key' => $key ),
+		) );
+		if ( is_wp_error( $response ) ) {
+			return array_merge( $empty, array( 'error' => $response->get_error_message() ) );
+		}
+		$code = wp_remote_retrieve_response_code( $response );
+		$data = json_decode( wp_remote_retrieve_body( $response ), true );
+		if ( 200 !== $code || ! is_array( $data ) ) {
+			$reason = ( is_array( $data ) && ! empty( $data['message'] ) ) ? $data['message'] : 'HTTP ' . $code;
+			return array_merge( $empty, array( 'error' => $reason ) );
+		}
+
+		return array_merge( $empty, $data );
+	}
+
+	/**
+	 * 中央サーバーのブロックログを消去する。
+	 *
+	 * @return true|WP_Error
+	 */
+	public static function clear_logs() {
+		$url = self::get_setting( 'url' );
+		$key = self::get_setting( 'key' );
+		if ( ! $url || ! $key ) {
+			return new WP_Error( 'cf7sb_no_key', 'ログの消去には接続設定と秘密キーが必要です。' );
+		}
+
+		$server_list = CF7SB_Server::local_list_name( $url );
+		if ( null !== $server_list ) {
+			CF7SB_Server::clear_logs( $server_list );
+			return true;
+		}
+
+		$log_url = self::endpoint_url( $url, 'log' );
+		if ( ! $log_url ) {
+			return new WP_Error( 'cf7sb_no_url', 'ログ用URLを組み立てられませんでした。' );
+		}
+		$response = wp_remote_request( $log_url, array(
+			'method'  => 'DELETE',
+			'timeout' => 10,
+			'headers' => array( 'X-CF7SB-Key' => $key ),
+		) );
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+		if ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
+			$data = json_decode( wp_remote_retrieve_body( $response ), true );
+			return new WP_Error( 'cf7sb_clear_failed', ( is_array( $data ) && ! empty( $data['message'] ) ) ? $data['message'] : 'ログを消去できませんでした。' );
+		}
+		return true;
+	}
+
+	/** ブロック理由の表示名 */
+	public static function rule_label( $rule ) {
+		$labels = array(
+			'domain'  => '拒否ドメイン',
+			'email'   => '拒否メールアドレス',
+			'keyword' => '拒否文字列',
+			'pattern' => '拒否パターン',
+			'uuid'    => '内蔵: UUID管理番号',
+			'link'    => '内蔵: 相互リンクフィルター',
+		);
+		return isset( $labels[ $rule ] ) ? $labels[ $rule ] : ( $rule ? $rule : '不明' );
+	}
+
+	/**
 	 * 配列を「文字列のみ・trim済み・空行なし・重複なし」に正規化する。
 	 */
 	public static function sanitize_lines( $items ) {

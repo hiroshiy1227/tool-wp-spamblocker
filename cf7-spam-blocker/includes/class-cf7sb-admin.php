@@ -18,21 +18,24 @@ class CF7SB_Admin {
 		add_action( 'admin_post_cf7sb_refresh', array( __CLASS__, 'handle_refresh' ) );
 		add_action( 'admin_post_cf7sb_enable_server', array( __CLASS__, 'handle_enable_server' ) );
 		add_action( 'admin_post_cf7sb_disable_server', array( __CLASS__, 'handle_disable_server' ) );
+		add_action( 'admin_post_cf7sb_clear_logs', array( __CLASS__, 'handle_clear_logs' ) );
 		add_action( 'admin_notices', array( __CLASS__, 'notices' ) );
 	}
 
 	public static function add_menu() {
-		add_options_page(
+		add_menu_page(
 			'CF7 Spam Blocker',
-			'CF7 Spam Blocker',
+			'Spam Blocker',
 			'manage_options',
 			'cf7sb',
-			array( __CLASS__, 'render_page' )
+			array( __CLASS__, 'render_page' ),
+			'dashicons-shield',
+			58.7
 		);
 	}
 
 	private static function redirect_back( $notice, $tab = '' ) {
-		$url = admin_url( 'options-general.php?page=cf7sb' );
+		$url = admin_url( 'admin.php?page=cf7sb' );
 		if ( $tab ) {
 			$url = add_query_arg( 'tab', $tab, $url );
 		}
@@ -133,6 +136,21 @@ class CF7SB_Admin {
 		self::redirect_back( 'blocklist_saved', 'blocklist' );
 	}
 
+	public static function handle_clear_logs() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( '権限がありません。' );
+		}
+		check_admin_referer( 'cf7sb_clear_logs' );
+
+		$cleared = CF7SB_Blocklist::clear_logs();
+		if ( is_wp_error( $cleared ) ) {
+			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $cleared->get_error_message(), MINUTE_IN_SECONDS );
+			self::redirect_back( 'logs_clear_failed', 'log' );
+		}
+
+		self::redirect_back( 'logs_cleared', 'log' );
+	}
+
 	public static function handle_refresh() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( '権限がありません。' );
@@ -220,6 +238,8 @@ class CF7SB_Admin {
 			'refreshed'       => array( 'success', 'ブロックリストを再取得しました。' ),
 			'server_enabled'  => array( 'success', 'このサイトを中央サーバーにしました。他のサイトは、下の「セットアップコード」を貼り付けるだけで接続できます。' ),
 			'server_disabled' => array( 'success', '中央サーバー機能を停止しました（保存済みのリストデータは残っています）。' ),
+			'logs_cleared'    => array( 'success', 'ブロックログを消去しました。' ),
+			'logs_clear_failed' => array( 'error', 'ブロックログを消去できませんでした。' . ( $error ? '（' . $error . '）' : '' ) ),
 			'push_failed'     => array( 'error', 'ブロックリストの保存に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
 			'code_invalid'    => array( 'error', 'セットアップコードを読み取れませんでした。コピー元のサイトで表示されたコードを、そのまま全部貼り付けてください。' ),
 			'refresh_failed'  => array( 'error', 'ブロックリストの取得に失敗しました。' . ( $error ? '（' . $error . '）' : '' ) ),
@@ -245,7 +265,7 @@ class CF7SB_Admin {
 
 		// 表示するタブ（未指定時は、未設定サイトならセットアップ、設定済みならブロック設定）
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
-		if ( ! in_array( $tab, array( 'setup', 'connection', 'blocklist' ), true ) ) {
+		if ( ! in_array( $tab, array( 'setup', 'connection', 'blocklist', 'log' ), true ) ) {
 			$tab = ( '' === $settings['url'] ) ? 'setup' : 'blocklist';
 		}
 
@@ -283,7 +303,7 @@ class CF7SB_Admin {
 		// 誤設定防止: 中央サーバー以外のサイトでは、接続済みならURL・キーは閲覧のみ
 		$conn_locked = ! CF7SB_Server::is_enabled() && '' !== $settings['url'];
 
-		$base_url = admin_url( 'options-general.php?page=cf7sb' );
+		$base_url = admin_url( 'admin.php?page=cf7sb' );
 		?>
 		<div class="wrap">
 			<h1>CF7 Spam Blocker</h1>
@@ -292,6 +312,7 @@ class CF7SB_Admin {
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'setup', $base_url ) ); ?>" class="nav-tab <?php echo 'setup' === $tab ? 'nav-tab-active' : ''; ?>">初期セットアップ</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'connection', $base_url ) ); ?>" class="nav-tab <?php echo 'connection' === $tab ? 'nav-tab-active' : ''; ?>">接続設定</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'blocklist', $base_url ) ); ?>" class="nav-tab <?php echo 'blocklist' === $tab ? 'nav-tab-active' : ''; ?>">ブロック設定</a>
+				<a href="<?php echo esc_url( add_query_arg( 'tab', 'log', $base_url ) ); ?>" class="nav-tab <?php echo 'log' === $tab ? 'nav-tab-active' : ''; ?>">ブロックログ</a>
 			</h2>
 
 			<?php if ( 'setup' === $tab ) : ?>
@@ -486,6 +507,79 @@ class CF7SB_Admin {
 					<?php submit_button( 'ブロックリストを保存（全サイトに反映）' ); ?>
 				<?php endif; ?>
 			</form>
+			<?php endif; ?>
+
+			<?php
+			if ( 'log' === $tab ) :
+				$log_data = CF7SB_Blocklist::fetch_logs( 100 );
+			?>
+				<p>
+					中央サーバーに記録された、ブロックした送信の履歴です（プラグインを導入した<strong>全サイト共通</strong>・最新<?php echo (int) CF7SB_Server::MAX_LOGS; ?>件まで保持）。
+				</p>
+
+				<?php if ( ! empty( $log_data['error'] ) ) : ?>
+					<div class="notice notice-error inline"><p>ログを取得できませんでした。（<?php echo esc_html( $log_data['error'] ); ?>）</p></div>
+				<?php endif; ?>
+
+				<?php if ( ! empty( $log_data['counts'] ) ) : ?>
+					<h2 style="margin-bottom:0.4em;">理由別の内訳（記録済み <?php echo (int) $log_data['total']; ?> 件）</h2>
+					<table class="widefat striped" style="max-width:520px; margin-bottom:1.5em;">
+						<thead><tr><th>ブロック理由</th><th style="width:90px; text-align:right;">件数</th></tr></thead>
+						<tbody>
+							<?php foreach ( $log_data['counts'] as $rule => $count ) : ?>
+								<tr>
+									<td><?php echo esc_html( CF7SB_Blocklist::rule_label( $rule ) ); ?></td>
+									<td style="text-align:right;"><?php echo (int) $count; ?></td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				<?php endif; ?>
+
+				<h2 style="margin-bottom:0.4em;">履歴（最新<?php echo count( $log_data['logs'] ); ?>件）</h2>
+				<table class="widefat striped">
+					<thead>
+						<tr>
+							<th style="width:140px;">日時</th>
+							<th style="width:130px;">サイト</th>
+							<th style="width:160px;">ブロック理由</th>
+							<th style="width:150px;">該当値</th>
+							<th style="width:170px;">メールアドレス</th>
+							<th>内容（抜粋）</th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php if ( empty( $log_data['logs'] ) ) : ?>
+							<tr><td colspan="6">まだブロックの記録はありません。</td></tr>
+						<?php else : ?>
+							<?php foreach ( $log_data['logs'] as $row ) : ?>
+								<tr>
+									<td><?php echo esc_html( wp_date( 'Y-m-d H:i', (int) $row['time'] ) ); ?></td>
+									<td><?php echo esc_html( $row['site'] ); ?></td>
+									<td><?php echo esc_html( CF7SB_Blocklist::rule_label( $row['rule'] ) ); ?></td>
+									<td style="word-break:break-all;"><code><?php echo esc_html( $row['matched'] ); ?></code></td>
+									<td style="word-break:break-all;"><?php echo esc_html( $row['email'] ); ?></td>
+									<td style="word-break:break-all;">
+										<?php echo esc_html( mb_substr( $row['excerpt'], 0, 120 ) ); ?><?php echo ( mb_strlen( $row['excerpt'] ) > 120 ) ? '…' : ''; ?>
+										<span class="description" style="display:block;">
+											項目: <?php echo esc_html( $row['field'] ); ?>
+											<?php if ( ! empty( $row['form'] ) ) : ?> ／ フォーム: <?php echo esc_html( $row['form'] ); ?><?php endif; ?>
+											<?php if ( ! empty( $row['ip'] ) ) : ?> ／ IP: <?php echo esc_html( $row['ip'] ); ?><?php endif; ?>
+										</span>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						<?php endif; ?>
+					</tbody>
+				</table>
+
+				<?php if ( ! empty( $log_data['logs'] ) ) : ?>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:1em;">
+						<?php wp_nonce_field( 'cf7sb_clear_logs' ); ?>
+						<input type="hidden" name="action" value="cf7sb_clear_logs">
+						<button type="submit" class="button button-link-delete" onclick="return confirm('ブロックログをすべて消去しますか？（全サイト共通のログです）');">ログをすべて消去する</button>
+					</form>
+				<?php endif; ?>
 			<?php endif; ?>
 		</div>
 		<style>

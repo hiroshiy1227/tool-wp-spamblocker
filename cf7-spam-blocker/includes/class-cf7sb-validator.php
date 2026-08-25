@@ -19,6 +19,12 @@ class CF7SB_Validator {
 	/** このリクエストで自プラグインがブロック判定したか */
 	private static $blocked = false;
 
+	/** ブロック理由（rule/matched/field/excerpt）。ログ記録に使う */
+	private static $block_info = null;
+
+	/** ログ記録済みか（1リクエストにつき1回だけ記録する） */
+	private static $logged = false;
+
 	public static function init() {
 		add_filter( 'wpcf7_spam', array( __CLASS__, 'spam_check' ), 10, 2 );
 		add_filter( 'wpcf7_display_message', array( __CLASS__, 'filter_display_message' ), 10, 2 );
@@ -42,6 +48,7 @@ class CF7SB_Validator {
 			$submission = WPCF7_Submission::get_instance();
 			if ( $submission && self::submission_blocked( $submission ) ) {
 				self::$blocked = true;
+				self::record_block( $submission );
 			}
 		}
 
@@ -137,50 +144,68 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 	}
 
 	/**
-	 * メール欄の値がブロック対象か（拒否メールアドレス完全一致／拒否ドメイン）。
+	 * メール欄の値がブロック対象なら理由を返す（拒否メールアドレス完全一致／拒否ドメイン）。
+	 *
+	 * @return array{rule: string, matched: string}|null
 	 */
-	public static function is_blocked_email_value( $value ) {
+	public static function detect_email_block( $value ) {
 		$value = strtolower( trim( (string) $value ) );
 		if ( '' === $value ) {
-			return false;
+			return null;
 		}
 		$list = CF7SB_Blocklist::get();
 
 		foreach ( $list['emails'] as $email ) {
 			if ( strtolower( trim( $email ) ) === $value ) {
-				return true;
+				return array( 'rule' => 'email', 'matched' => $email );
 			}
 		}
 		foreach ( $list['domains'] as $domain ) {
 			// 完全一致＋サブドメインも対象
 			if ( preg_match( '/@([a-z0-9\-]+\.)*' . preg_quote( strtolower( $domain ), '/' ) . '$/i', $value ) ) {
-				return true;
+				return array( 'rule' => 'domain', 'matched' => $domain );
 			}
 		}
-		return false;
+		return null;
+	}
+
+	public static function is_blocked_email_value( $value ) {
+		return null !== self::detect_email_block( $value );
 	}
 
 	/**
-	 * テキスト/本文欄の値がブロック対象か
-	 * （拒否ドメイン・拒否メールアドレス・拒否文字列を含む／拒否パターンに一致）。
+	 * テキスト/本文欄の値がブロック対象なら理由を返す
+	 * （拒否ドメイン・拒否メールアドレス・拒否文字列を含む／相互リンク／拒否パターン）。
+	 *
+	 * @return array{rule: string, matched: string}|null
 	 */
-	public static function is_blocked_text_value( $value ) {
+	public static function detect_text_block( $value ) {
 		$value = (string) $value;
 		if ( '' === $value ) {
-			return false;
+			return null;
 		}
-		$list    = CF7SB_Blocklist::get();
-		$needles = array_merge( $list['domains'], $list['emails'], $list['keywords'] );
+		$list = CF7SB_Blocklist::get();
 
-		foreach ( $needles as $needle ) {
-			if ( false !== stripos( $value, $needle ) ) {
-				return true;
+		$groups = array(
+			'domain'  => $list['domains'],
+			'email'   => $list['emails'],
+			'keyword' => $list['keywords'],
+		);
+		foreach ( $groups as $rule => $needles ) {
+			foreach ( $needles as $needle ) {
+				if ( false !== stripos( $value, $needle ) ) {
+					return array( 'rule' => $rule, 'matched' => $needle );
+				}
 			}
 		}
 		if ( ! empty( $list['block_link'] ) && self::is_link_exchange_value( $value ) ) {
-			return true;
+			return array( 'rule' => 'link', 'matched' => self::link_exchange_score( $value ) . '点' );
 		}
-		return self::matches_pattern( $value );
+		return self::detect_pattern( $value );
+	}
+
+	public static function is_blocked_text_value( $value ) {
+		return null !== self::detect_text_block( $value );
 	}
 
 	/**
@@ -224,31 +249,38 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 	}
 
 	/**
-	 * 拒否パターン（正規表現）に一致するか。
+	 * 拒否パターン（正規表現）に一致するなら理由を返す。
+	 *
+	 * @return array{rule: string, matched: string}|null
 	 */
-	public static function matches_pattern( $value ) {
+	public static function detect_pattern( $value ) {
 		$value = (string) $value;
 		if ( '' === $value ) {
-			return false;
+			return null;
 		}
 		$list = CF7SB_Blocklist::get();
 
 		// 内蔵ルール: UUID形式の管理番号（設定でON/OFF可・全サイト共通）
 		if ( ! empty( $list['block_uuid'] )
 			&& 1 === @preg_match( CF7SB_Blocklist::wrap_pattern( CF7SB_Blocklist::UUID_PATTERN ), $value ) ) {
-			return true;
+			return array( 'rule' => 'uuid', 'matched' => 'UUID形式の管理番号' );
 		}
 
 		foreach ( $list['patterns'] as $pattern ) {
 			if ( 1 === @preg_match( CF7SB_Blocklist::wrap_pattern( $pattern ), $value ) ) {
-				return true;
+				return array( 'rule' => 'pattern', 'matched' => $pattern );
 			}
 		}
-		return false;
+		return null;
+	}
+
+	public static function matches_pattern( $value ) {
+		return null !== self::detect_pattern( $value );
 	}
 
 	/**
 	 * 送信データ全体をチェックしてブロック対象か判定する。
+	 * ブロックする場合は、理由・該当値・該当項目をログ用に記録する。
 	 */
 	public static function submission_blocked( $submission ) {
 		if ( ! $submission || ! method_exists( $submission, 'get_contact_form' ) ) {
@@ -268,15 +300,55 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 			if ( is_array( $value ) ) {
 				$value = implode( ' ', $value );
 			}
-			if ( 'email' === $tag->basetype ) {
-				if ( self::is_blocked_email_value( $value ) || self::matches_pattern( $value ) ) {
-					return true;
-				}
-			} elseif ( self::is_blocked_text_value( $value ) ) {
+
+			$hit = ( 'email' === $tag->basetype )
+				? ( self::detect_email_block( $value ) ?: self::detect_pattern( $value ) )
+				: self::detect_text_block( $value );
+
+			if ( $hit ) {
+				self::$block_info = array(
+					'rule'    => $hit['rule'],
+					'matched' => $hit['matched'],
+					'field'   => $tag->name,
+					'excerpt' => $value,
+				);
 				return true;
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * ブロックした送信を中央サーバーのログに記録する（1リクエストにつき1回）。
+	 */
+	private static function record_block( $submission ) {
+		if ( self::$logged || ! self::$block_info || ! $submission ) {
+			return;
+		}
+		self::$logged = true;
+
+		$form  = method_exists( $submission, 'get_contact_form' ) ? $submission->get_contact_form() : null;
+		$data  = method_exists( $submission, 'get_posted_data' ) ? $submission->get_posted_data() : array();
+		$email = '';
+
+		if ( $form && is_array( $data ) ) {
+			foreach ( $form->scan_form_tags() as $tag ) {
+				if ( 'email' === $tag->basetype && ! empty( $data[ $tag->name ] ) ) {
+					$email = is_array( $data[ $tag->name ] ) ? reset( $data[ $tag->name ] ) : $data[ $tag->name ];
+					break;
+				}
+			}
+		}
+
+		CF7SB_Blocklist::log_block( array(
+			'rule'    => self::$block_info['rule'],
+			'matched' => self::$block_info['matched'],
+			'field'   => self::$block_info['field'],
+			'excerpt' => self::$block_info['excerpt'],
+			'email'   => $email,
+			'form'    => $form ? $form->title() : '',
+			'ip'      => method_exists( $submission, 'get_meta' ) ? (string) $submission->get_meta( 'remote_ip' ) : '',
+		) );
 	}
 
 	/**
@@ -288,6 +360,7 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 		}
 		if ( self::submission_blocked( $submission ) ) {
 			self::$blocked = true;
+			self::record_block( $submission );
 			return true;
 		}
 		return $spam;
