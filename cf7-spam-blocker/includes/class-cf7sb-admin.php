@@ -561,8 +561,8 @@ class CF7SB_Admin {
 					<thead>
 						<tr>
 							<th style="width:140px;">日時</th>
-							<th style="width:130px;">サイト</th>
-							<th style="width:160px;">ブロック理由</th>
+							<th style="width:34%;">サイト名</th>
+							<th style="white-space:nowrap;">ブロック理由</th>
 							<th style="width:150px;">該当値</th>
 							<th style="width:170px;">メールアドレス</th>
 							<th>内容（抜粋）</th>
@@ -576,11 +576,17 @@ class CF7SB_Admin {
 								<tr>
 									<td><?php echo esc_html( wp_date( 'Y-m-d H:i', (int) $row['time'] ) ); ?></td>
 									<td><?php echo esc_html( $row['site'] ); ?></td>
-									<td><?php echo esc_html( CF7SB_Blocklist::rule_label( $row['rule'] ) ); ?></td>
+									<td style="white-space:nowrap;"><?php echo esc_html( CF7SB_Blocklist::rule_label( $row['rule'] ) ); ?></td>
 									<td style="word-break:break-all;"><code><?php echo esc_html( $row['matched'] ); ?></code></td>
 									<td style="word-break:break-all;"><?php echo esc_html( $row['email'] ); ?></td>
 									<td style="word-break:break-all;">
-										<?php echo esc_html( mb_substr( $row['excerpt'], 0, 120 ) ); ?><?php echo ( mb_strlen( $row['excerpt'] ) > 120 ) ? '…' : ''; ?>
+										<?php if ( mb_strlen( $row['excerpt'] ) > 120 ) : ?>
+											<span class="cf7sb-log-short"><?php echo esc_html( mb_substr( $row['excerpt'], 0, 120 ) ); ?>…</span>
+											<span class="cf7sb-log-full" hidden style="white-space:pre-wrap;"><?php echo esc_html( $row['excerpt'] ); ?></span>
+											<button type="button" class="button button-small cf7sb-log-toggle" style="display:block; margin-top:4px;">全文を表示</button>
+										<?php else : ?>
+											<?php echo esc_html( $row['excerpt'] ); ?>
+										<?php endif; ?>
 										<span class="description" style="display:block;">
 											項目: <?php echo esc_html( $row['field'] ); ?>
 											<?php if ( ! empty( $row['form'] ) ) : ?> ／ フォーム: <?php echo esc_html( $row['form'] ); ?><?php endif; ?>
@@ -727,6 +733,19 @@ class CF7SB_Admin {
 			if ( codeOut && codeCopy ) {
 				codeCopy.addEventListener( 'click', function () { copyValue( codeOut, codeCopy ); } );
 			}
+
+			// ブロックログ: 抜粋と全文をボタンで切り替える
+			document.querySelectorAll( '.cf7sb-log-toggle' ).forEach( function ( btn ) {
+				btn.addEventListener( 'click', function () {
+					var cell    = btn.closest( 'td' );
+					var shortEl = cell.querySelector( '.cf7sb-log-short' );
+					var fullEl  = cell.querySelector( '.cf7sb-log-full' );
+					var opening = fullEl.hasAttribute( 'hidden' );
+					fullEl.toggleAttribute( 'hidden', ! opening );
+					shortEl.toggleAttribute( 'hidden', opening );
+					btn.textContent = opening ? '折りたたむ' : '全文を表示';
+				} );
+			} );
 
 			// タグ入力UI: textareaを隠し、登録済み項目をタグで表示。追加はモーダル、削除は×ボタン。
 			// 値の実体は元のtextareaに持たせたままなので、保存処理・入力復元はそのまま動く。

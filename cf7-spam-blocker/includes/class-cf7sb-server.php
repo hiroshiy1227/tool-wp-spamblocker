@@ -248,7 +248,7 @@ class CF7SB_Server {
 			'matched' => $text( isset( $entry['matched'] ) ? $entry['matched'] : '', 200 ),
 			'field'   => $text( isset( $entry['field'] ) ? $entry['field'] : '', 100 ),
 			'email'   => $text( isset( $entry['email'] ) ? $entry['email'] : '', 200 ),
-			'excerpt' => $text( isset( $entry['excerpt'] ) ? $entry['excerpt'] : '', 400 ),
+			'excerpt' => $text( isset( $entry['excerpt'] ) ? $entry['excerpt'] : '', 2000 ),
 			'ip'      => $text( isset( $entry['ip'] ) ? $entry['ip'] : '', 45 ),
 		);
 	}
