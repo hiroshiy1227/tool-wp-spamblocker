@@ -214,66 +214,68 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 	 * 誤ブロックを防ぐため、判定は2段構えにしている。
 	 *   (1) 強シグナル（依頼の核心語・+2点）が1つも無ければ、他が揃ってもブロックしない
 	 *   (2) 強シグナルがあっても、弱シグナルを合わせて合計3点未満なら通過
-	 *
-	 * 強シグナル（いずれかで+2点。「載せ合う提案」にしか現れない語に限定）:
-	 *   - 相互リンク・リンク交換・発リンク・dofollow
-	 *   - 言い換え型: 相互紹介／相互送客／相互掲載・「紹介し合う」等・コンテンツ連携／記事連携
-	 * 弱シグナル（各+1点。単独・組み合わせでは決してブロックに至らない）:
-	 *   - 「リンクを設置／掲載／追加」「アンカーテキスト」などの依頼の言い回し
-	 *   - 本文にURL（営業メールは自社サイトのURLをほぼ必ず載せてくる）
-	 *   - 「突然のご連絡」「唐突なご連絡」などの営業定型の導入句
-	 *   - DR・ドメイン評価・SEO・被リンク などの検索評価用語
-	 *   - 「費用は一切かかりません」等の無償オファー（「〜かかりませんか？」の質問形は除外）
-	 *   - 「サイト運営ご担当者様」等の宛名（事業ではなくサイト宛ての営業）
-	 *   - 「親和性」（売り込み特有の語）
-	 *
 	 * 被リンク・nofollow・SEO などは正当な顧客も使う語なので強シグナルにしない。
-	 * 「相互リンク」という語が本文に偶然含まれるだけの正当な問い合わせ
-	 * （URLも営業定型句もないもの）は2点止まりで通過する。
+	 *
+	 * @return array{score:int, core:bool, blocked:bool, rows:array}
+	 *         rows: 各シグナルの array{label:string, points:int, max:int, matched:string}
+	 *         （ブロックチェッカーの内訳表示と判定本体で共用）
 	 */
-	public static function link_exchange_score( $value ) {
+	public static function link_exchange_breakdown( $value ) {
 		$value = (string) $value;
-		if ( '' === $value ) {
-			return 0;
-		}
-		$score = self::has_link_exchange_core( $value ) ? 2 : 0;
-		if ( preg_match( '/リンク(を|の)?(設置|掲載|追加)|アンカーテキスト/u', $value ) ) {
-			$score += 1;
-		}
-		if ( preg_match( '#https?://#i', $value ) ) {
-			$score += 1;
-		}
-		if ( preg_match( '/(突然|唐突)の(ご)?(連絡|メール)/u', $value ) ) {
-			$score += 1;
-		}
-		if ( preg_match( '/ドメイン(評価|パワー|レーティング)|(^|[^a-z])DR([^a-z]|$)|SEO|検索順位|サイト集客|被リンク|nofollow/iu', $value ) ) {
-			$score += 1;
-		}
-		if ( preg_match( '/費用(は|も|が)?(一切|いっさい)?(かか|掛か)(らず|らない|りません(?!か))|(無料|無償)で(の)?(ご)?(掲載|紹介|案内|リンク)/u', $value ) ) {
-			$score += 1;
-		}
-		if ( preg_match( '/(サイト|ホームページ|ブログ|メディア)\s*(の)?\s*運営\s*(ご)?担当者?様|運営者様/u', $value ) ) {
-			$score += 1;
-		}
-		if ( preg_match( '/親和性/u', $value ) ) {
-			$score += 1;
-		}
-		return $score;
-	}
 
-	/**
-	 * 強シグナル: リンク・記事を「載せ合う」提案の核心語が含まれるか。
-	 * これが無い送信は、弱シグナルが何個揃ってもブロックしない。
-	 */
-	private static function has_link_exchange_core( $value ) {
-		return (bool) preg_match(
-			'/相互\s*リンク|リンク\s*交換|発リンク|dofollow|相互(に)?(ご)?(紹介|送客|掲載)|(ご)?(紹介|掲載|送客)し(合|あ)|(コンテンツ|記事)連携/iu',
-			(string) $value
+		$signals = array(
+			array( '依頼の核心語（相互リンク・リンク交換・発リンク・dofollow・相互紹介／送客／掲載・「紹介し合う」・コンテンツ連携／記事連携）', 2,
+				'/相互\s*リンク|リンク\s*交換|発リンク|dofollow|相互(に)?(ご)?(紹介|送客|掲載)|(ご)?(紹介|掲載|送客)し(合|あ)|(コンテンツ|記事)連携/iu' ),
+			array( 'リンク設置の言い回し（リンクを設置／掲載／追加・アンカーテキスト）', 1,
+				'/リンク(を|の)?(設置|掲載|追加)|アンカーテキスト/u' ),
+			array( '本文中のURL', 1, '#https?://\S*#i' ),
+			array( '営業定型の導入句（「突然のご連絡」「唐突なご連絡」等）', 1, '/(突然|唐突)の(ご)?(連絡|メール)/u' ),
+			array( '検索評価の用語（DR・ドメイン評価・SEO・検索順位・被リンク・nofollow等）', 1,
+				'/ドメイン(評価|パワー|レーティング)|(^|[^a-z])DR([^a-z]|$)|SEO|検索順位|サイト集客|被リンク|nofollow/iu' ),
+			array( '無償オファー（「費用は一切かかりません」等。「かかりませんか？」の質問形は除外）', 1,
+				'/費用(は|も|が)?(一切|いっさい)?(かか|掛か)(らず|らない|りません(?!か))|(無料|無償)で(の)?(ご)?(掲載|紹介|案内|リンク)/u' ),
+			array( 'サイト運営宛ての宛名（「サイト運営ご担当者様」等）', 1,
+				'/(サイト|ホームページ|ブログ|メディア)\s*(の)?\s*運営\s*(ご)?担当者?様|運営者様/u' ),
+			array( '売り込み特有の語（親和性）', 1, '/親和性/u' ),
+		);
+
+		$score = 0;
+		$core  = false;
+		$rows  = array();
+		foreach ( $signals as $signal ) {
+			list( $label, $points, $pattern ) = $signal;
+			$matched = '';
+			if ( '' !== $value && preg_match( $pattern, $value, $m ) ) {
+				$matched = $m[0];
+				$score  += $points;
+				if ( 2 === $points ) {
+					$core = true;
+				}
+			}
+			$rows[] = array(
+				'label'   => $label,
+				'points'  => ( '' !== $matched ) ? $points : 0,
+				'max'     => $points,
+				'matched' => $matched,
+			);
+		}
+
+		return array(
+			'score'   => $score,
+			'core'    => $core,
+			'blocked' => ( $core && $score >= 3 ),
+			'rows'    => $rows,
 		);
 	}
 
+	public static function link_exchange_score( $value ) {
+		$breakdown = self::link_exchange_breakdown( $value );
+		return $breakdown['score'];
+	}
+
 	public static function is_link_exchange_value( $value ) {
-		return self::has_link_exchange_core( $value ) && self::link_exchange_score( $value ) >= 3;
+		$breakdown = self::link_exchange_breakdown( $value );
+		return $breakdown['blocked'];
 	}
 
 	/**

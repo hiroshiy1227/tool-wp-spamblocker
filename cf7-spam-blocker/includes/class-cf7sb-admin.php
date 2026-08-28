@@ -284,12 +284,12 @@ class CF7SB_Admin {
 
 		// 表示するタブ（未指定時は、未設定サイトならセットアップ、設定済みならブロック設定）
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
-		if ( ! in_array( $tab, array( 'setup', 'connection', 'blocklist', 'log', 'sites' ), true ) ) {
+		if ( ! in_array( $tab, array( 'setup', 'connection', 'blocklist', 'checker', 'log', 'sites' ), true ) ) {
 			$tab = ( '' === $settings['url'] ) ? 'setup' : 'blocklist';
 		}
 
 		// ブロック設定タブを開いたら常に最新を取得（「今すぐ再取得」ボタンの代わり）
-		if ( 'blocklist' === $tab && '' !== $settings['url'] ) {
+		if ( in_array( $tab, array( 'blocklist', 'checker' ), true ) && '' !== $settings['url'] ) {
 			CF7SB_Blocklist::refresh();
 		}
 
@@ -331,6 +331,7 @@ class CF7SB_Admin {
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'setup', $base_url ) ); ?>" class="nav-tab <?php echo 'setup' === $tab ? 'nav-tab-active' : ''; ?>">初期セットアップ</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'connection', $base_url ) ); ?>" class="nav-tab <?php echo 'connection' === $tab ? 'nav-tab-active' : ''; ?>">接続設定</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'blocklist', $base_url ) ); ?>" class="nav-tab <?php echo 'blocklist' === $tab ? 'nav-tab-active' : ''; ?>">ブロック設定</a>
+				<a href="<?php echo esc_url( add_query_arg( 'tab', 'checker', $base_url ) ); ?>" class="nav-tab <?php echo 'checker' === $tab ? 'nav-tab-active' : ''; ?>">ブロックチェッカー</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'log', $base_url ) ); ?>" class="nav-tab <?php echo 'log' === $tab ? 'nav-tab-active' : ''; ?>">ブロックログ</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'sites', $base_url ) ); ?>" class="nav-tab <?php echo 'sites' === $tab ? 'nav-tab-active' : ''; ?>">接続サイト</a>
 			</h2>
@@ -527,6 +528,247 @@ class CF7SB_Admin {
 					<?php submit_button( 'ブロックリストを保存（全サイトに反映）' ); ?>
 				<?php endif; ?>
 			</form>
+			<?php endif; ?>
+
+			<?php if ( 'checker' === $tab ) :
+				$chk_email = '';
+				$chk_body  = '';
+				$chk_ran   = false;
+				if ( isset( $_POST['cf7sb_check'] ) && check_admin_referer( 'cf7sb_checker' ) ) {
+					$chk_ran   = true;
+					$chk_email = trim( sanitize_text_field( wp_unslash( isset( $_POST['chk_email'] ) ? $_POST['chk_email'] : '' ) ) );
+					$chk_body  = trim( (string) wp_unslash( isset( $_POST['chk_body'] ) ? $_POST['chk_body'] : '' ) );
+				}
+
+				// 実際の送信とまったく同じ判定関数を使う（メール欄の判定→本文の判定の順）
+				$email_hit = ( $chk_ran && '' !== $chk_email )
+					? ( CF7SB_Validator::detect_email_block( $chk_email ) ?: CF7SB_Validator::detect_pattern( $chk_email ) )
+					: null;
+				$body_hit = ( $chk_ran && '' !== $chk_body ) ? CF7SB_Validator::detect_text_block( $chk_body ) : null;
+				$overall  = $email_hit ? $email_hit : $body_hit;
+
+				// 該当箇所を前後の文脈つきで表示する（表示専用）
+				$chk_context = function ( $text, $matched ) {
+					if ( '' === (string) $matched || '' === (string) $text ) {
+						return '&mdash;';
+					}
+					$pos = mb_stripos( $text, $matched );
+					if ( false === $pos ) {
+						return '<code>' . esc_html( $matched ) . '</code>';
+					}
+					$len  = mb_strlen( $matched );
+					$tidy = function ( $part ) {
+						return preg_replace( '/\s+/u', ' ', $part );
+					};
+					return ( $pos > 20 ? '&hellip;' : '' )
+						. esc_html( $tidy( mb_substr( $text, max( 0, $pos - 20 ), min( 20, $pos ) ) ) )
+						. '<mark>' . esc_html( $tidy( mb_substr( $text, $pos, $len ) ) ) . '</mark>'
+						. esc_html( $tidy( mb_substr( $text, $pos + $len, 20 ) ) )
+						. ( mb_strlen( $text ) > $pos + $len + 20 ? '&hellip;' : '' );
+				};
+			?>
+				<p>
+					受信した迷惑メールの本文を貼り付けると、現在のブロックリストで<strong>ブロックされるか・通過するか</strong>を事前に確認できます。<br>
+					実際の送信とまったく同じ判定ロジックを使います（リスト最終取得: <?php echo esc_html( $fetched_at ); ?>）。ここでの確認はブロックログには記録されません。
+				</p>
+
+				<form method="post" action="<?php echo esc_url( add_query_arg( 'tab', 'checker', $base_url ) ); ?>">
+					<?php wp_nonce_field( 'cf7sb_checker' ); ?>
+					<table class="form-table">
+						<tr>
+							<th scope="row"><label for="chk_email">メールアドレス欄（任意）</label></th>
+							<td>
+								<input type="text" id="chk_email" name="chk_email" class="regular-text" value="<?php echo esc_attr( $chk_email ); ?>" placeholder="例: aaa@spam.com">
+								<p class="description">フォームのメールアドレス欄に入力された想定の値（拒否メールアドレス・拒否ドメインの判定を確認できます）。</p>
+							</td>
+						</tr>
+						<tr>
+							<th scope="row"><label for="chk_body">本文</label></th>
+							<td><textarea id="chk_body" name="chk_body" rows="12" class="large-text code" placeholder="判定したいメール本文を貼り付けてください"><?php echo esc_textarea( $chk_body ); ?></textarea></td>
+						</tr>
+					</table>
+					<p><button type="submit" name="cf7sb_check" value="1" class="button button-primary">判定する</button></p>
+				</form>
+
+				<?php if ( $chk_ran && '' === $chk_email && '' === $chk_body ) : ?>
+					<div class="notice notice-warning inline"><p>本文またはメールアドレスを入力してください。</p></div>
+				<?php elseif ( $chk_ran ) : ?>
+
+					<?php if ( $overall ) : ?>
+						<div style="border:2px solid #d63638; background:#fcf0f1; padding:12px 16px; margin:0 0 1.4em; font-size:14px;">
+							<span class="dashicons dashicons-dismiss" style="color:#d63638; vertical-align:middle;"></span>
+							<strong>ブロックされます</strong>
+							&mdash; 理由: <strong><?php echo esc_html( CF7SB_Blocklist::rule_label( $overall['rule'] ) ); ?></strong>
+							／ 一致: <code><?php echo esc_html( $overall['matched'] ); ?></code>
+							／ 該当欄: <?php echo $email_hit ? 'メールアドレス欄' : '本文'; ?>
+						</div>
+					<?php else : ?>
+						<div style="border:2px solid #00a32a; background:#edfaef; padding:12px 16px; margin:0 0 1.4em; font-size:14px;">
+							<span class="dashicons dashicons-yes-alt" style="color:#00a32a; vertical-align:middle;"></span>
+							<strong>通過します</strong> &mdash; 現在のブロックリスト・内蔵ルールのいずれにも該当しません。
+						</div>
+					<?php endif; ?>
+
+					<?php if ( '' !== $chk_email ) : ?>
+						<h2 style="margin-bottom:0.4em;">メールアドレス欄の照合結果</h2>
+						<table class="widefat striped" style="max-width:960px; margin-bottom:1.6em;">
+							<thead><tr><th style="width:260px;">ルール</th><th style="width:110px;">結果</th><th>一致した登録</th></tr></thead>
+							<tbody>
+								<?php
+								$mail_lower = strtolower( $chk_email );
+								$hit_emails = array();
+								foreach ( $list['emails'] as $needle ) {
+									if ( strtolower( trim( $needle ) ) === $mail_lower ) {
+										$hit_emails[] = $needle;
+									}
+								}
+								$hit_domains = array();
+								foreach ( $list['domains'] as $needle ) {
+									if ( preg_match( '/@([a-z0-9\-]+\.)*' . preg_quote( strtolower( $needle ), '/' ) . '$/i', $mail_lower ) ) {
+										$hit_domains[] = $needle;
+									}
+								}
+								$mail_pattern = CF7SB_Validator::detect_pattern( $chk_email );
+								$mail_rows    = array(
+									array( '拒否メールアドレス（完全一致・' . count( $list['emails'] ) . '件登録）', $hit_emails ),
+									array( '拒否ドメイン（サブドメイン含む・' . count( $list['domains'] ) . '件登録）', $hit_domains ),
+									array( '拒否パターン・UUID管理番号', $mail_pattern ? array( $mail_pattern['matched'] ) : array() ),
+								);
+								foreach ( $mail_rows as $mail_row ) :
+									list( $row_label, $row_hits ) = $mail_row;
+								?>
+									<tr>
+										<td><?php echo esc_html( $row_label ); ?></td>
+										<td><?php echo $row_hits ? '<span style="color:#d63638; font-weight:600;">一致</span>' : '<span style="color:#00a32a;">該当なし</span>'; ?></td>
+										<td><?php echo $row_hits ? '<code>' . implode( '</code> <code>', array_map( 'esc_html', $row_hits ) ) . '</code>' : '&mdash;'; ?></td>
+									</tr>
+								<?php endforeach; ?>
+							</tbody>
+						</table>
+					<?php endif; ?>
+
+					<?php if ( '' !== $chk_body ) : ?>
+						<h2 style="margin-bottom:0.4em;">本文の照合結果</h2>
+						<p class="description" style="margin-top:0;">実際の判定は上の行から順に行われ、最初に一致したルールが理由として記録されます。</p>
+						<table class="widefat striped" style="max-width:960px; margin-bottom:1.6em;">
+							<thead><tr><th style="width:260px;">ルール</th><th style="width:110px;">結果</th><th>該当箇所</th></tr></thead>
+							<tbody>
+								<?php
+								$body_cats = array(
+									array( '拒否ドメイン', $list['domains'] ),
+									array( '拒否メールアドレス', $list['emails'] ),
+									array( '拒否文字列', $list['keywords'] ),
+								);
+								foreach ( $body_cats as $body_cat ) :
+									list( $cat_label, $cat_needles ) = $body_cat;
+									$cat_hits = array();
+									foreach ( $cat_needles as $needle ) {
+										if ( '' !== $needle && false !== mb_stripos( $chk_body, $needle ) ) {
+											$cat_hits[] = $needle;
+										}
+									}
+								?>
+									<tr>
+										<td><?php echo esc_html( $cat_label . '（' . count( $cat_needles ) . '件登録）' ); ?></td>
+										<td><?php echo $cat_hits ? '<span style="color:#d63638; font-weight:600;">一致</span>' : '<span style="color:#00a32a;">該当なし</span>'; ?></td>
+										<td>
+											<?php
+											if ( $cat_hits ) {
+												foreach ( $cat_hits as $cat_hit ) {
+													echo '<div><code>' . esc_html( $cat_hit ) . '</code> ： ' . $chk_context( $chk_body, $cat_hit ) . '</div>';
+												}
+											} else {
+												echo '&mdash;';
+											}
+											?>
+										</td>
+									</tr>
+								<?php endforeach; ?>
+								<?php
+								$uuid_hit = '';
+								if ( preg_match( CF7SB_Blocklist::wrap_pattern( CF7SB_Blocklist::UUID_PATTERN ), $chk_body, $uuid_m ) ) {
+									$uuid_hit = $uuid_m[0];
+								}
+								?>
+								<tr>
+									<td>内蔵: UUID管理番号（<?php echo $list['block_uuid'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）</td>
+									<td>
+										<?php
+										if ( '' !== $uuid_hit && $list['block_uuid'] ) {
+											echo '<span style="color:#d63638; font-weight:600;">一致</span>';
+										} elseif ( '' !== $uuid_hit ) {
+											echo '<span style="color:#8c8f94;">一致（無効のため対象外）</span>';
+										} else {
+											echo '<span style="color:#00a32a;">該当なし</span>';
+										}
+										?>
+									</td>
+									<td><?php echo '' !== $uuid_hit ? $chk_context( $chk_body, $uuid_hit ) : '&mdash;'; ?></td>
+								</tr>
+								<?php
+								$pattern_hits = array();
+								foreach ( $list['patterns'] as $chk_pattern ) {
+									if ( 1 === @preg_match( CF7SB_Blocklist::wrap_pattern( $chk_pattern ), $chk_body, $pat_m ) ) {
+										$pattern_hits[] = array( $chk_pattern, $pat_m[0] );
+									}
+								}
+								?>
+								<tr>
+									<td>拒否パターン（正規表現・<?php echo count( $list['patterns'] ); ?>件登録）</td>
+									<td><?php echo $pattern_hits ? '<span style="color:#d63638; font-weight:600;">一致</span>' : '<span style="color:#00a32a;">該当なし</span>'; ?></td>
+									<td>
+										<?php
+										if ( $pattern_hits ) {
+											foreach ( $pattern_hits as $pattern_hit ) {
+												echo '<div><code>' . esc_html( $pattern_hit[0] ) . '</code> ： ' . $chk_context( $chk_body, $pattern_hit[1] ) . '</div>';
+											}
+										} else {
+											echo '&mdash;';
+										}
+										?>
+									</td>
+								</tr>
+							</tbody>
+						</table>
+
+						<?php $chk_bd = CF7SB_Validator::link_exchange_breakdown( $chk_body ); ?>
+						<h2 style="margin-bottom:0.4em;">相互リンクフィルターのスコア内訳（<?php echo $list['block_link'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）</h2>
+						<table class="widefat striped" style="max-width:960px;">
+							<thead><tr><th>シグナル</th><th style="width:70px; text-align:center;">加点</th><th style="width:44%;">該当箇所</th></tr></thead>
+							<tbody>
+								<?php foreach ( $chk_bd['rows'] as $bd_row ) : ?>
+									<tr>
+										<td><?php echo esc_html( $bd_row['label'] ); ?></td>
+										<td style="text-align:center;"><?php echo '' !== $bd_row['matched'] ? '<strong>+' . (int) $bd_row['points'] . '</strong>' : '<span style="color:#8c8f94;">0</span>'; ?></td>
+										<td><?php echo '' !== $bd_row['matched'] ? $chk_context( $chk_body, $bd_row['matched'] ) : '&mdash;'; ?></td>
+									</tr>
+								<?php endforeach; ?>
+							</tbody>
+							<tfoot>
+								<tr>
+									<th style="font-size:14px;">合計</th>
+									<th style="text-align:center; font-size:14px;"><?php echo (int) $chk_bd['score']; ?>点</th>
+									<th style="font-weight:normal;">
+										判定:
+										<?php
+										if ( $chk_bd['blocked'] ) {
+											echo '<strong style="color:#d63638;">ブロック</strong>（核心語あり かつ 3点以上）';
+										} elseif ( ! $chk_bd['core'] ) {
+											echo '<strong style="color:#00a32a;">通過</strong>（依頼の核心語が無いため、点数に関わらずブロックしません）';
+										} else {
+											echo '<strong style="color:#00a32a;">通過</strong>（核心語はあるが合計3点未満）';
+										}
+										?>
+										<?php if ( ! $list['block_link'] ) : ?>
+											<br><span class="description">※ フィルター自体が無効のため、実際の送信ではこのルールは適用されません（ブロック設定タブで有効化できます）。</span>
+										<?php endif; ?>
+									</th>
+								</tr>
+							</tfoot>
+						</table>
+					<?php endif; ?>
+
+				<?php endif; ?>
 			<?php endif; ?>
 
 			<?php
