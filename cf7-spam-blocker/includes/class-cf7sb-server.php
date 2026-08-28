@@ -100,6 +100,8 @@ class CF7SB_Server {
 			'message'    => isset( $list['message'] ) ? (string) $list['message'] : '',
 			'block_uuid' => isset( $list['block_uuid'] ) ? (bool) $list['block_uuid'] : true,
 			'block_link' => isset( $list['block_link'] ) ? (bool) $list['block_link'] : false,
+			// v2.12.0で相互リンクフィルターから分離。未保存の間は旧設定を引き継ぐ（更新直後の保護切れを防ぐ）
+			'block_sales' => isset( $list['block_sales'] ) ? (bool) $list['block_sales'] : ( isset( $list['block_link'] ) && (bool) $list['block_link'] ),
 			'updated'    => isset( $list['updated'] ) ? $list['updated'] : null,
 		);
 	}
@@ -116,6 +118,7 @@ class CF7SB_Server {
 			'patterns' => CF7SB_Blocklist::sanitize_patterns( isset( $data['patterns'] ) ? $data['patterns'] : array() ),
 			'block_uuid' => isset( $data['block_uuid'] ) ? (bool) $data['block_uuid'] : true,
 			'block_link' => isset( $data['block_link'] ) ? (bool) $data['block_link'] : false,
+			'block_sales' => isset( $data['block_sales'] ) ? (bool) $data['block_sales'] : false,
 			'message'  => isset( $data['message'] ) && is_string( $data['message'] )
 				? mb_substr( trim( wp_strip_all_tags( $data['message'] ) ), 0, 500 )
 				: '',

@@ -100,8 +100,9 @@ class CF7SB_Admin {
 		}
 		$block_uuid = ! empty( $_POST['cf7sb_block_uuid'] );
 		$block_link = ! empty( $_POST['cf7sb_block_link'] );
+		$block_sales = ! empty( $_POST['cf7sb_block_sales'] );
 
-		$pending = array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'patterns' => $patterns_text, 'message' => $message_text, 'block_uuid' => $block_uuid, 'block_link' => $block_link );
+		$pending = array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'patterns' => $patterns_text, 'message' => $message_text, 'block_uuid' => $block_uuid, 'block_link' => $block_link, 'block_sales' => $block_sales );
 
 		// 正規表現として不正なパターンは保存前に弾いて知らせる（黙って消さない）
 		$invalid_patterns = array();
@@ -124,7 +125,8 @@ class CF7SB_Admin {
 			$message_text,
 			preg_split( '/\r\n|\r|\n/', $patterns_text ),
 			$block_uuid,
-			$block_link
+			$block_link,
+			$block_sales
 		);
 		if ( is_wp_error( $pushed ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $pushed->get_error_message(), MINUTE_IN_SECONDS );
@@ -468,7 +470,7 @@ class CF7SB_Admin {
 						<td>
 							<input type="text" id="cf7sb_block_message" name="cf7sb_block_message" class="large-text"
 								value="<?php echo esc_attr( $message_text ); ?>" <?php disabled( ! $can_edit ); ?>>
-							<p class="description">ブロック時にフォーム全体の送信結果として表示する文言。リストと同じく中央サーバーに保存され、<strong>どのサイトで変更しても全サイトに反映</strong>されます。</p>
+							<p class="description">ブロックした相手の画面に表示される文言です。どのサイトで変更しても全サイトに反映されます。</p>
 						</td>
 					</tr>
 					<tr>
@@ -476,7 +478,10 @@ class CF7SB_Admin {
 						<td>
 							<textarea id="cf7sb_domains" name="cf7sb_domains" rows="8" class="large-text code cf7sb-taglist"
 								data-cf7sb-label="拒否ドメイン" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $domains_text ); ?></textarea>
-							<p class="description">メール欄はサブドメイン含む完全一致、本文・テキスト欄は文字列として含まれていればブロックします。例: <code>spam.com</code></p>
+							<p class="description">
+								<strong>会社のメールアドレス（独自ドメイン）から送ってくる相手に。</strong>
+								@より後ろ（例: <code>spam.com</code>）を登録すると、そのドメインのメールアドレスからの送信や、本文にそのドメインが書かれた送信をブロックします。
+							</p>
 						</td>
 					</tr>
 					<tr>
@@ -484,7 +489,10 @@ class CF7SB_Admin {
 						<td>
 							<textarea id="cf7sb_emails" name="cf7sb_emails" rows="8" class="large-text code cf7sb-taglist"
 								data-cf7sb-label="拒否メールアドレス" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $emails_text ); ?></textarea>
-							<p class="description">メール欄がこのアドレスと完全一致した場合にブロックします。gmail.com などフリーメールの迷惑送信者は、ドメインではなくこちらに登録してください。例: <code>spam@gmail.com</code></p>
+							<p class="description">
+								<strong>gmail.com などフリーメールから送ってくる相手に。</strong>
+								アドレス単位（例: <code>spam@gmail.com</code>）で登録します。ドメインごと拒否すると、同じフリーメールを使う正当な問い合わせまで止まってしまうためです。
+							</p>
 						</td>
 					</tr>
 					<tr>
@@ -492,7 +500,10 @@ class CF7SB_Admin {
 						<td>
 							<textarea id="cf7sb_keywords" name="cf7sb_keywords" rows="8" class="large-text code cf7sb-taglist"
 								data-cf7sb-label="拒否文字列" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $keywords_text ); ?></textarea>
-							<p class="description">本文・テキスト欄にこの文字列（会社名など）が含まれていればブロックします。</p>
+							<p class="description">
+								<strong>決まった会社名・サービス名を名乗って何度も送ってくる相手に。</strong>
+								本文にこの言葉が含まれていればブロックします。（例: 株式会社スパム商事）
+							</p>
 						</td>
 					</tr>
 					<tr>
@@ -503,30 +514,37 @@ class CF7SB_Admin {
 									<?php checked( $list['block_uuid'] ); ?> <?php disabled( ! $can_edit ); ?>>
 								UUID形式の管理番号をブロックする（推奨・全サイト共通）
 							</label>
-							<p class="description">「管理番号: 08ffb4e6-9d35-4f9e-b173-…」のような <code>8桁-4桁-4桁-4桁-12桁</code> の英数字IDが本文などに含まれる送信を拒否します。この形式のIDが正当な問い合わせに現れることはまずありません。</p>
+							<p class="description">「管理番号: 08ffb4e6-…」のような英数字IDつきの定型迷惑メールをブロックします。ONのままで問題ありません。</p>
 							<label style="display:block; margin-top:0.8em;">
 								<input type="checkbox" name="cf7sb_block_link" value="1"
 									<?php checked( $list['block_link'] ); ?> <?php disabled( ! $can_edit ); ?>>
-								相互リンクフィルター（リンク設置依頼の営業メールをブロック・全サイト共通）
+								相互リンクフィルター（全サイト共通）
 							</label>
-							<p class="description">
-								判定は2段構えです。「相互リンク」「リンク交換」「紹介し合う」「コンテンツ連携」等の依頼の核心語、または「配信停止はこちら」等の一斉配信メールの定型文——この<strong>強シグナル（+2点）が含まれない送信は、何点でもブロックしません</strong>。強シグナルがある場合のみ、リンク設置の言い回し・本文中のURL（3か所以上でさらに加点）・「突然のご連絡」等の営業定型句・DRやSEO等の用語・無償オファー・「サイト運営ご担当者様」等の宛名（各+1点）を加算し、<strong>合計3点以上</strong>で拒否します。<br>
-								SEO・被リンク等はお客様も使う語のため核心語にしていません。「SEOの相談です。サイトはhttps://…」のような正当な問い合わせや、本文にたまたま「相互リンク」と書かれただけの問い合わせはブロックされません。
-							</p>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="cf7sb_patterns">拒否パターン（正規表現）</label></th>
-						<td>
-							<textarea id="cf7sb_patterns" name="cf7sb_patterns" rows="6" class="large-text code cf7sb-taglist"
-								data-cf7sb-label="拒否パターン（正規表現）" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $patterns_text ); ?></textarea>
-							<p class="description">
-								すべての入力欄（メール・電話・URL含む）に対して正規表現で判定します。デリミタ（<code>/～/</code>）は不要、大文字小文字は区別しません。<br>
-								例（スペースを挟んだドメイン偽装）: <code>spam\s*\.\s*co\s*\.\s*jp</code>
-							</p>
+							<p class="description">「相互リンクしませんか」「貴社サイトで紹介してもらえませんか」といったリンク設置依頼の営業メールを自動判定でブロックします。</p>
+							<label style="display:block; margin-top:0.8em;">
+								<input type="checkbox" name="cf7sb_block_sales" value="1"
+									<?php checked( $list['block_sales'] ); ?> <?php disabled( ! $can_edit ); ?>>
+								営業メールフィルター（全サイト共通）
+							</label>
+							<p class="description">「配信停止はこちら」のような一斉配信メールの定型文を含む営業メールを自動判定でブロックします。</p>
+							<p class="description" style="margin-top:0.8em;">どちらのフィルターも、複数の条件がそろったときだけ反応するため正当な問い合わせは通過します。判定の内訳は「ブロックチェッカー」タブで確認できます。</p>
 						</td>
 					</tr>
 				</table>
+
+				<details style="margin:0.5em 0 1em;" <?php echo $list['patterns'] ? 'open' : ''; ?>>
+					<summary style="cursor:pointer; color:#2271b1;">上級者向け設定（拒否パターン・正規表現）</summary>
+					<table class="form-table" role="presentation">
+						<tr>
+							<th scope="row"><label for="cf7sb_patterns">拒否パターン（正規表現）</label></th>
+							<td>
+								<textarea id="cf7sb_patterns" name="cf7sb_patterns" rows="6" class="large-text code cf7sb-taglist"
+									data-cf7sb-label="拒否パターン（正規表現）" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $patterns_text ); ?></textarea>
+								<p class="description">すべての入力欄を正規表現で判定します。デリミタ不要・大文字小文字は区別しません。例（スペースを挟んだドメイン偽装）: <code>spam\s*\.\s*co\s*\.\s*jp</code></p>
+							</td>
+						</tr>
+					</table>
+				</details>
 				<?php if ( $can_edit ) : ?>
 					<?php submit_button( 'ブロックリストを保存（全サイトに反映）' ); ?>
 				<?php endif; ?>
@@ -734,8 +752,8 @@ class CF7SB_Admin {
 							</tbody>
 						</table>
 
-						<?php $chk_bd = CF7SB_Validator::link_exchange_breakdown( $chk_body ); ?>
-						<h2 style="margin-bottom:0.4em;">相互リンクフィルターのスコア内訳（<?php echo $list['block_link'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）</h2>
+						<?php $chk_bd = CF7SB_Validator::filter_breakdown( $chk_body ); ?>
+						<h2 style="margin-bottom:0.4em;">内蔵フィルターのスコア内訳</h2>
 						<table class="widefat striped" style="max-width:960px;">
 							<thead><tr><th>シグナル</th><th style="width:70px; text-align:center;">加点</th><th style="width:44%;">該当箇所</th></tr></thead>
 							<tbody>
@@ -752,19 +770,30 @@ class CF7SB_Admin {
 									<th style="font-size:14px;">合計</th>
 									<th style="text-align:center; font-size:14px;"><?php echo (int) $chk_bd['score']; ?>点</th>
 									<th style="font-weight:normal;">
-										判定:
 										<?php
-										if ( $chk_bd['blocked'] ) {
-											echo '<strong style="color:#d63638;">ブロック</strong>（核心語あり かつ 3点以上）';
-										} elseif ( ! $chk_bd['core'] ) {
-											echo '<strong style="color:#00a32a;">通過</strong>（依頼の核心語が無いため、点数に関わらずブロックしません）';
-										} else {
-											echo '<strong style="color:#00a32a;">通過</strong>（核心語はあるが合計3点未満）';
-										}
+										$chk_filters = array(
+											array( '相互リンクフィルター', $list['block_link'], $chk_bd['blocked_link'], $chk_bd['core_link'], '依頼の核心語' ),
+											array( '営業メールフィルター', $list['block_sales'], $chk_bd['blocked_sales'], $chk_bd['core_sales'], '一斉配信メールの定型文' ),
+										);
+										foreach ( $chk_filters as $chk_f ) :
+											list( $f_label, $f_enabled, $f_blocked, $f_core, $f_core_label ) = $chk_f;
 										?>
-										<?php if ( ! $list['block_link'] ) : ?>
-											<br><span class="description">※ フィルター自体が無効のため、実際の送信ではこのルールは適用されません（ブロック設定タブで有効化できます）。</span>
-										<?php endif; ?>
+											<div style="margin-bottom:0.3em;">
+												<?php echo esc_html( $f_label ); ?>:
+												<?php
+												if ( $f_blocked ) {
+													echo '<strong style="color:#d63638;">ブロック</strong>（' . esc_html( $f_core_label ) . 'あり かつ 3点以上）';
+												} elseif ( ! $f_core ) {
+													echo '<strong style="color:#00a32a;">通過</strong>（' . esc_html( $f_core_label ) . 'が無いため、点数に関わらずブロックしません）';
+												} else {
+													echo '<strong style="color:#00a32a;">通過</strong>（' . esc_html( $f_core_label ) . 'はあるが合計3点未満）';
+												}
+												if ( ! $f_enabled ) {
+													echo ' <span class="description">※ フィルター無効のため実際の送信では適用されません</span>';
+												}
+												?>
+											</div>
+										<?php endforeach; ?>
 									</th>
 								</tr>
 							</tfoot>
