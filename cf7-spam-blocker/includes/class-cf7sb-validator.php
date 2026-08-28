@@ -215,6 +215,8 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 	 *   (1) 強シグナル（依頼の核心語・+2点）が1つも無ければ、他が揃ってもブロックしない
 	 *   (2) 強シグナルがあっても、弱シグナルを合わせて合計3点未満なら通過
 	 * 被リンク・nofollow・SEO などは正当な顧客も使う語なので強シグナルにしない。
+	 * 強シグナルは「載せ合う提案の核心語」と「一斉配信メールの定型文（配信停止の解除案内）」。
+	 * 「配信停止してください」という正当な依頼文は定型文パターンに一致しない。
 	 *
 	 * @return array{score:int, core:bool, blocked:bool, rows:array}
 	 *         rows: 各シグナルの array{label:string, points:int, max:int, matched:string}
@@ -226,9 +228,12 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 		$signals = array(
 			array( '依頼の核心語（相互リンク・リンク交換・発リンク・dofollow・相互紹介／送客／掲載・「紹介し合う」・コンテンツ連携／記事連携）', 2,
 				'/相互\s*リンク|リンク\s*交換|発リンク|dofollow|相互(に)?(ご)?(紹介|送客|掲載)|(ご)?(紹介|掲載|送客)し(合|あ)|(コンテンツ|記事)連携/iu' ),
+			array( '一斉配信メールの定型文（「配信停止はこちら」等の解除案内。正当な問い合わせには現れない）', 2,
+				'/(配信|メルマガ)の?(停止|解除)(の|を)?ご?希望|(配信|メルマガ)の?(停止|解除)は(こちら|お手数)|配信の?(停止|解除).{0,60}(宛|までご?連絡)/us' ),
 			array( 'リンク設置の言い回し（リンクを設置／掲載／追加・アンカーテキスト）', 1,
 				'/リンク(を|の)?(設置|掲載|追加)|アンカーテキスト/u' ),
 			array( '本文中のURL', 1, '#https?://\S*#i' ),
+			array( '多数のURL（本文に3か所以上。一斉送信の営業文の特徴）', 1, 'url3' ),
 			array( '営業定型の導入句（「突然のご連絡」「唐突なご連絡」等）', 1, '/(突然|唐突)の(ご)?(連絡|メール)/u' ),
 			array( '検索評価の用語（DR・ドメイン評価・SEO・検索順位・被リンク・nofollow等）', 1,
 				'/ドメイン(評価|パワー|レーティング)|(^|[^a-z])DR([^a-z]|$)|SEO|検索順位|サイト集客|被リンク|nofollow/iu' ),
@@ -245,11 +250,21 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 		foreach ( $signals as $signal ) {
 			list( $label, $points, $pattern ) = $signal;
 			$matched = '';
-			if ( '' !== $value && preg_match( $pattern, $value, $m ) ) {
-				$matched = $m[0];
-				$score  += $points;
-				if ( 2 === $points ) {
-					$core = true;
+			if ( '' !== $value ) {
+				if ( 'url3' === $pattern ) {
+					// 正規表現ではなくURLの個数で判定する特別なシグナル
+					$url_count = preg_match_all( '#https?://#i', $value );
+					if ( $url_count >= 3 ) {
+						$matched = 'URL ' . $url_count . 'か所';
+					}
+				} elseif ( preg_match( $pattern, $value, $m ) ) {
+					$matched = $m[0];
+				}
+				if ( '' !== $matched ) {
+					$score += $points;
+					if ( 2 === $points ) {
+						$core = true;
+					}
 				}
 			}
 			$rows[] = array(
