@@ -325,7 +325,10 @@ class CF7SB_Admin {
 		$base_url = admin_url( 'admin.php?page=cf7sb' );
 		?>
 		<div class="wrap">
-			<h1>CF7 Spam Blocker</h1>
+			<h1>
+				CF7 Spam Blocker
+				<span style="font-size:13px; font-weight:normal; color:#646970; vertical-align:middle;">v<?php echo esc_html( CF7SB_VERSION ); ?></span>
+			</h1>
 
 			<h2 class="nav-tab-wrapper" style="margin-bottom:1.2em;">
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'setup', $base_url ) ); ?>" class="nav-tab <?php echo 'setup' === $tab ? 'nav-tab-active' : ''; ?>">初期セットアップ</a>
