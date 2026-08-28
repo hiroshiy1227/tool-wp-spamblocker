@@ -212,25 +212,12 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 	}
 
 	/**
-	 * 内蔵フィルターの営業メール判定エンジン（相互リンクフィルター・営業メールフィルター共用）。
-	 *
-	 * 誤ブロックを防ぐため、判定は2段構えにしている。
-	 *   (1) 強シグナル（各フィルターの核心・+2点）が無ければ、他が揃ってもそのフィルターはブロックしない
-	 *       - 相互リンクフィルターの核心: 相互リンク等の「載せ合う提案」の依頼用語
-	 *       - 営業メールフィルターの核心: 「配信停止はこちら」等の一斉配信メールの定型文
-	 *         （「配信停止してください」という正当な依頼文は一致しない）
-	 *   (2) 核心があっても、弱シグナルを合わせて合計3点未満なら通過
-	 * 被リンク・nofollow・SEO などは正当な顧客も使う語なので強シグナルにしない。
-	 *
-	 * @return array{score:int, core_link:bool, core_sales:bool, blocked_link:bool, blocked_sales:bool, rows:array}
-	 *         rows: 各シグナルの array{label:string, points:int, max:int, matched:string}
-	 *         （ブロックチェッカーの内訳表示と判定本体で共用）
+	 * 内蔵フィルターのシグナル定義（判定エンジンと「内蔵ルール」タブの表示で共用）。
+	 * genre: link=相互リンクフィルターの核心 / sales=営業メールフィルターの核心 / weak=共通の弱シグナル
+	 * 各要素: array( genre, label, points, pattern )。pattern 'url3' はURLが3か所以上あるかの特別判定。
 	 */
-	public static function filter_breakdown( $value ) {
-		$value = (string) $value;
-
-		// genre: link=相互リンクフィルターの核心 / sales=営業メールフィルターの核心 / weak=共通の弱シグナル
-		$signals = array(
+	public static function filter_signals() {
+		return array(
 			array( 'link', '依頼の核心語（相互リンク・リンク交換・発リンク・dofollow・相互紹介／送客／掲載・「紹介し合う」・コンテンツ連携／記事連携）', 2,
 				'/相互\s*リンク|リンク\s*交換|発リンク|dofollow|相互(に)?(ご)?(紹介|送客|掲載)|(ご)?(紹介|掲載|送客)し(合|あ)|(コンテンツ|記事)連携/iu' ),
 			array( 'sales', '一斉配信メールの定型文（「配信停止はこちら」等の解除案内。正当な問い合わせには現れない）', 2,
@@ -248,6 +235,27 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 				'/(サイト|ホームページ|ブログ|メディア)\s*(の)?\s*運営\s*(ご)?担当者?様|運営者様/u' ),
 			array( 'weak', '売り込み特有の語（親和性）', 1, '/親和性/u' ),
 		);
+	}
+
+	/**
+	 * 内蔵フィルターの営業メール判定エンジン（相互リンクフィルター・営業メールフィルター共用）。
+	 *
+	 * 誤ブロックを防ぐため、判定は2段構えにしている。
+	 *   (1) 強シグナル（各フィルターの核心・+2点）が無ければ、他が揃ってもそのフィルターはブロックしない
+	 *       - 相互リンクフィルターの核心: 相互リンク等の「載せ合う提案」の依頼用語
+	 *       - 営業メールフィルターの核心: 「配信停止はこちら」等の一斉配信メールの定型文
+	 *         （「配信停止してください」という正当な依頼文は一致しない）
+	 *   (2) 核心があっても、弱シグナルを合わせて合計3点未満なら通過
+	 * 被リンク・nofollow・SEO などは正当な顧客も使う語なので強シグナルにしない。
+	 *
+	 * @return array{score:int, core_link:bool, core_sales:bool, blocked_link:bool, blocked_sales:bool, rows:array}
+	 *         rows: 各シグナルの array{label:string, points:int, max:int, matched:string}
+	 *         （ブロックチェッカーの内訳表示と判定本体で共用）
+	 */
+	public static function filter_breakdown( $value ) {
+		$value = (string) $value;
+
+		$signals = self::filter_signals();
 
 		$score      = 0;
 		$core_link  = false;

@@ -286,7 +286,7 @@ class CF7SB_Admin {
 
 		// 表示するタブ（未指定時は、未設定サイトならセットアップ、設定済みならブロック設定）
 		$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
-		if ( ! in_array( $tab, array( 'setup', 'connection', 'blocklist', 'checker', 'log', 'sites' ), true ) ) {
+		if ( ! in_array( $tab, array( 'setup', 'connection', 'blocklist', 'checker', 'rules', 'log', 'sites' ), true ) ) {
 			$tab = ( '' === $settings['url'] ) ? 'setup' : 'blocklist';
 		}
 
@@ -336,7 +336,8 @@ class CF7SB_Admin {
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'setup', $base_url ) ); ?>" class="nav-tab <?php echo 'setup' === $tab ? 'nav-tab-active' : ''; ?>">初期セットアップ</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'connection', $base_url ) ); ?>" class="nav-tab <?php echo 'connection' === $tab ? 'nav-tab-active' : ''; ?>">接続設定</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'blocklist', $base_url ) ); ?>" class="nav-tab <?php echo 'blocklist' === $tab ? 'nav-tab-active' : ''; ?>">ブロック設定</a>
-				<a href="<?php echo esc_url( add_query_arg( 'tab', 'checker', $base_url ) ); ?>" class="nav-tab <?php echo 'checker' === $tab ? 'nav-tab-active' : ''; ?>">ブロックチェッカー</a>
+				<a href="<?php echo esc_url( add_query_arg( 'tab', 'checker', $base_url ) ); ?>" class="nav-tab <?php echo 'checker' === $tab ? 'nav-tab-active' : ''; ?>">判定チェッカー</a>
+				<a href="<?php echo esc_url( add_query_arg( 'tab', 'rules', $base_url ) ); ?>" class="nav-tab <?php echo 'rules' === $tab ? 'nav-tab-active' : ''; ?>">内蔵ルール</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'log', $base_url ) ); ?>" class="nav-tab <?php echo 'log' === $tab ? 'nav-tab-active' : ''; ?>">ブロックログ</a>
 				<a href="<?php echo esc_url( add_query_arg( 'tab', 'sites', $base_url ) ); ?>" class="nav-tab <?php echo 'sites' === $tab ? 'nav-tab-active' : ''; ?>">接続サイト</a>
 			</h2>
@@ -527,7 +528,7 @@ class CF7SB_Admin {
 								営業メールフィルター（全サイト共通）
 							</label>
 							<p class="description">「配信停止はこちら」のような一斉配信メールの定型文を含む営業メールを自動判定でブロックします。</p>
-							<p class="description" style="margin-top:0.8em;">どちらのフィルターも、複数の条件がそろったときだけ反応するため正当な問い合わせは通過します。判定の内訳は「ブロックチェッカー」タブで確認できます。</p>
+							<p class="description" style="margin-top:0.8em;">どちらのフィルターも、複数の条件がそろったときだけ反応するため正当な問い合わせは通過します。判定の内訳は「判定チェッカー」タブで確認できます。</p>
 						</td>
 					</tr>
 				</table>
@@ -801,6 +802,71 @@ class CF7SB_Admin {
 					<?php endif; ?>
 
 				<?php endif; ?>
+			<?php endif; ?>
+
+			<?php if ( 'rules' === $tab ) : ?>
+				<p>
+					プラグインに組み込まれている判定ルールの仕組みです（<strong>閲覧のみ</strong>・内容の変更はできません）。<br>
+					各ルールのON/OFFは「ブロック設定」タブで切り替え、実際の本文での動作は「判定チェッカー」タブで確認できます。
+				</p>
+
+				<h2 style="margin-bottom:0.4em;">判定の流れ</h2>
+				<ol style="max-width:900px; margin-top:0;">
+					<li>フォームの各入力欄（メール・テキスト・本文・URL・電話）を順に照合します。</li>
+					<li>メールアドレス欄: 拒否メールアドレス（完全一致）→ 拒否ドメイン（サブドメイン含む）→ UUID管理番号・拒否パターン</li>
+					<li>本文・テキスト欄: 拒否ドメイン → 拒否メールアドレス → 拒否文字列 → 相互リンクフィルター → 営業メールフィルター → UUID管理番号 → 拒否パターン</li>
+					<li>1つでも一致したらその場で送信をブロックし、最初に一致したルールを理由としてブロックログに記録します。</li>
+				</ol>
+
+				<h2 style="margin-bottom:0.4em;">内蔵ルール1: UUID形式の管理番号（現在: <?php echo $list['block_uuid'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）</h2>
+				<p style="max-width:900px; margin-top:0;">
+					「管理番号: 08ffb4e6-9d35-4f9e-b173-…」のような <code>8桁-4桁-4桁-4桁-12桁</code> の英数字ID（UUID）が含まれる送信をブロックします。
+					迷惑メール業者が配信管理に使うIDで、正当な問い合わせに現れることはまずありません。
+				</p>
+				<p class="description">判定パターン（正規表現）: <code><?php echo esc_html( CF7SB_Blocklist::UUID_PATTERN ); ?></code></p>
+
+				<h2 style="margin:1.4em 0 0.4em;">内蔵ルール2: 相互リンクフィルター（現在: <?php echo $list['block_link'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）／ 営業メールフィルター（現在: <?php echo $list['block_sales'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）</h2>
+				<p style="max-width:900px; margin-top:0;">
+					2つのフィルターは下表のシグナルを共有し、<strong>2段構え</strong>で判定します。誤ブロックを防ぐための設計です。
+				</p>
+				<ol style="max-width:900px; margin-top:0;">
+					<li><strong>核心シグナル（+2点）が無ければ、他が何点そろってもブロックしません。</strong><br>
+						相互リンクフィルターの核心は「依頼の核心語」、営業メールフィルターの核心は「一斉配信メールの定型文」です。</li>
+					<li>核心シグナルがある場合のみ、共通の加点条件（各+1点）を合算し、<strong>合計3点以上</strong>でブロックします。</li>
+				</ol>
+				<table class="widefat striped" style="max-width:1100px;">
+					<thead>
+						<tr>
+							<th style="width:190px;">種別</th>
+							<th style="width:70px; text-align:center;">加点</th>
+							<th style="width:34%;">シグナル</th>
+							<th>判定パターン（正規表現）</th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php
+						$genre_labels = array(
+							'link'  => '<strong>相互リンクフィルターの核心</strong>',
+							'sales' => '<strong>営業メールフィルターの核心</strong>',
+							'weak'  => '共通の加点条件',
+						);
+						foreach ( CF7SB_Validator::filter_signals() as $rule_signal ) :
+							list( $sig_genre, $sig_label, $sig_points, $sig_pattern ) = $rule_signal;
+						?>
+							<tr>
+								<td><?php echo isset( $genre_labels[ $sig_genre ] ) ? wp_kses_post( $genre_labels[ $sig_genre ] ) : esc_html( $sig_genre ); ?></td>
+								<td style="text-align:center;">+<?php echo (int) $sig_points; ?></td>
+								<td><?php echo esc_html( $sig_label ); ?></td>
+								<td style="word-break:break-all;">
+									<?php echo ( 'url3' === $sig_pattern ) ? '（正規表現ではなくURLの個数で判定: 3か所以上）' : '<code>' . esc_html( $sig_pattern ) . '</code>'; ?>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+				<p class="description" style="margin-top:0.8em;">
+					この表はプラグイン本体の判定コードから自動生成しているため、表示と実際の動作が食い違うことはありません。プラグインの更新でシグナルが追加・調整されると、この表にも自動で反映されます。
+				</p>
 			<?php endif; ?>
 
 			<?php
