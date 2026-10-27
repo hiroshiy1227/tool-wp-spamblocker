@@ -204,6 +204,9 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 		if ( ! empty( $list['block_sales'] ) && self::is_sales_mail_value( $value ) ) {
 			return array( 'rule' => 'sales', 'matched' => self::link_exchange_score( $value ) . '点' );
 		}
+		if ( ! empty( $list['block_partner'] ) && self::is_partner_mail_value( $value ) ) {
+			return array( 'rule' => 'partner', 'matched' => self::link_exchange_score( $value ) . '点' );
+		}
 		return self::detect_pattern( $value );
 	}
 
@@ -213,7 +216,7 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 
 	/**
 	 * 内蔵フィルターのシグナル定義（判定エンジンと「内蔵ルール」タブの表示で共用）。
-	 * genre: link=相互リンクフィルターの核心 / sales=営業メールフィルターの核心 / weak=共通の弱シグナル
+	 * genre: link=相互リンクフィルターの核心 / sales=営業メールフィルターの核心 / partner=外注・パートナーフィルターの核心 / weak=共通の弱シグナル
 	 * 各要素: array( genre, label, points, pattern )。pattern 'url3' はURLが3か所以上あるかの特別判定。
 	 */
 	public static function filter_signals() {
@@ -221,18 +224,32 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 			array( 'link', '依頼の核心語（相互リンク・リンク交換・発リンク・dofollow・相互紹介／送客／掲載・「紹介し合う」・コンテンツ連携／記事連携）', 2,
 				'/相互\s*リンク|リンク\s*交換|発リンク|dofollow|相互(に)?(ご)?(紹介|送客|掲載)|(ご)?(紹介|掲載|送客)し(合|あ)|(コンテンツ|記事)連携/iu' ),
 			array( 'sales', '一斉配信メールの定型文（「配信停止はこちら」等の解除案内。正当な問い合わせには現れない）', 2,
-				'/(配信|メルマガ)の?(停止|解除)(の|を)?ご?希望|(配信|メルマガ)の?(停止|解除)は(こちら|お手数)|配信の?(停止|解除).{0,60}(宛|までご?連絡)/us' ),
+				'/(配信|メルマガ)の?(停止|解除)(の|を)?ご?希望|(配信|メルマガ)の?(停止|解除)は(こちら|お手数)|配信の?(停止|解除).{0,60}(宛|までご?連絡)|今後の?ご案内が不要な(方|場合)/us' ),
 			array( 'sales', '売り込みの定型句（「ご興味がございましたら」等、受け手の関心を条件にする言い回し。問い合わせる側は自分が興味を持っている側なので使わない）', 2,
-				'/ご興味(が|を)?\s*(ございましたら|ありましたら|あれば|お持ち\s*(いただけ|ください)ましたら|お持ちでしたら)|ご興味のある方/u' ),
-			array( 'sales', '商談予約ツールのURL（Timerex・Calendly等。売り込み側が自分の予約カレンダーを差し出すときにしか現れない）', 2,
-				'/timerex\.net|calendly\.com|youcanbook\.me|meetings\.hubspot\.com|spirinc\.com|aitemasu\.me/i' ),
+				'/ご(興味|関心)(が|を)?\s*(ございましたら|ありましたら|あれば|(お持ち|持って)?\s*(いただけ|ください)ましたら|お持ちでしたら)|ご興味のある方/u' ),
+			array( 'sales', '商談予約ツールのURL（Timerex・Calendly・Spir・eeasy等。売り込み側が自分の予約カレンダーを差し出すときにしか現れない）', 2,
+				'/timerex\.net|calendly\.com|youcanbook\.me|meetings\.hubspot\.com|spirinc\.com|aitemasu\.me|biskett\.me|jicoo\.com|nitte\.app|calendar\.app\.google|[a-z0-9-]+\.eeasy\.jp|vivit\.video|waaq\.jp/i' ),
 			array( 'sales', '売り込みの申し出（「ご提案させていただきたく」等、こちらから提案する言い回し。依頼する側は「ご提案いただきたい」と受け取る側の言い方になる）', 2,
-				'/(ご|お)提案(を)?(さ?せて(いただき|頂き)|差し上げ|(いた)?したく)/u' ),
+				'/(ご|お)提案(を)?(さ?せて(いただき|頂き)|差し上げ|(いた)?したく|いたします|可能です)|営業のご案内で恐縮/u' ),
+			array( 'partner', '外部・制作・開発・協業パートナーの売り込み（「外部パートナー」「制作パートナー」「パートナーとして」等）', 2,
+				'/((外部|制作|開発|技術|実装|コーディング|デザイン|実行|ビジネス|協業|外注|オフショア開発?|販売・?紹介|共同提案|裏方|Web制作の)パートナー|パートナー(として|候補|提携|募集|制度|事業)|パートナー企業として)/iu' ),
+			array( 'partner', '外注先・下請け・業務委託・OEM・BPO・SESの売り込み（「外注先として」「下請け」「OEM提供」「オフショア開発」等）', 2,
+				'/((外注|発注)(先|候補)(として|をお探し|をご検討|にお悩み|がなかなか|に)|下請け(専門|価格|慣れ|制作|案件|として(?!腕を磨))|業務委託(として|パートナー|での|案件)|(コーディング|デザイン|LP制作|Web制作|サイト制作|記事制作|動画制作|システム開発).{0,15}(外注|アウトソーシング)|(オフショア|ラボ型)開発|SES(事業|企業|パートナー)|BPO(サービス|事業|支援)|OEM(提供|開発|販売|ツール|パートナー)|(データ入力|DM発送|営業|記事作成|記事制作|note運用)代行|代理店向け.{0,15}デモ|アフィリエイト広告で運用可能か|報酬単価|\/1CV)/iu' ),
+			array( 'partner', 'フリーランス・制作者の案件獲得営業（「フリーランスで〜」「Webコーダーの〜」「ポートフォリオ」等）', 2,
+				'/((フリーランス|個人事業主)(として|で).{0,25}(コーダー|デザイナー|エンジニア|ディレクター|ライター|プログラマー|動画編集|Web制作|ホームページ制作|サイト制作|LP制作|活動|制作)|(Web|ウェブ|LP|WordPress|Shopify|フロントエンド|マークアップ)\s*(コーダー|デザイナー|エンジニア|ディレクター|ライター)\s*(として活動|をしており|の[^\s、。]{1,12}と申します)|監修者として|ポートフォリオ|自己紹介(スライド|動画|資料)|ご挨拶動画|営業スライド|(制作)?実績(サイト|ページ|一覧|・自己紹介))/iu' ),
+			array( 'partner', 'ポートフォリオ・スライド共有サービスURL（Canva・Notion・foriio等）', 2,
+				'/(canva\.com\/design|canva\.link|my\.canva\.site|notion\.site|notion\.so\/|fori\.io)/iu' ),
+			array( 'partner', '制作支援・お力添え・リソース補填の申し出（「お力添えできれば」「お力になれれば」「リソース不足」等）', 2,
+				'/(お力添え(でき(れば|ましたら|る|ないか)|したく|いたし|させて)|お力になれ(れば|ましたら|る|たら|そう)|お役に立て(れば|ましたら|ますと|たら|そう|る(かと|と思い|のでは|部分|場面))|お手伝い(でき(れば|ましたら|る)|させていただけ|したく)|(リソース|人手|手が)(の?不足|が?足り(ない|なくなる)|が?余っており)|繁忙期.{0,15}(外注|パートナー|案件|ご相談|対応|サポート)|(案件|制作)が(重な|立て込)|ディレクター様の(進行負担|負担|工数)|(手戻り|差し戻し).{0,10}(減ら|抑え|少な|軽減|防止)|確認・?修正(工数|の負担)を(減ら|削減|軽減)|貴社の制作チームの一員)/iu' ),
+			array( 'partner', '連絡先Chatwork・案件相談の定型誘導（「Chatwork：」「単発案件から」「スポット案件」等）', 2,
+				'/(chatwork\.com\/|Chatwork\s*ID|(単発|スポット)(案件|依頼).{0,10}(から|でも|も歓迎|対応|もOK)|小さな(ご相談|案件|修正)からでも)/iu' ),
+			array( 'partner', '協業・アライアンス・情報交換・案件紹介の提案（「協業のご提案」「情報交換」「案件のご紹介」等）', 2,
+				'/((協業|業務提携|アライアンス)(のご提案|のご案内|のご相談|について|先として|でき(れば|ないか|る)|による|をさせて頂)|情報交換(が?でき(れば|ましたら|たら)|の(お時間|機会)|も兼ね)|ご挨拶の(お時間|機会)をいただけ|相互に(案件|顧客|クライアント)を?(紹介|送客)|(御社|貴社)の?(クライアント|顧客|お客様)様?(へ|に|向け)|クライアント様への(ご提案|提案幅|付加価値)|(ご提案ラインナップ|追加提案商材)|サービス拡販にご協力)/iu' ),
 			array( 'weak', 'リンク設置の言い回し（リンクを設置／掲載／追加・アンカーテキスト）', 1,
 				'/リンク(を|の)?(設置|掲載|追加)|アンカーテキスト/u' ),
 			array( 'weak', '本文中のURL', 1, '#https?://\S*#i' ),
 			array( 'weak', '多数のURL（本文に3か所以上。一斉送信の営業文の特徴）', 1, 'url3' ),
-			array( 'weak', '営業定型の導入句（「突然のご連絡」「唐突なご連絡」等）', 1, '/(突然|唐突)の(ご)?(連絡|メール)/u' ),
+			array( 'weak', '営業定型の導入句（「突然のご連絡」「唐突なご連絡」等）', 1, '/(突然|唐突)(の|な)(ご)?(連絡|メール)/u' ),
 			array( 'weak', '検索評価の用語（DR・ドメイン評価・SEO・検索順位・被リンク・nofollow等）', 1,
 				'/ドメイン(評価|パワー|レーティング)|(^|[^a-z])DR([^a-z]|$)|SEO|検索順位|サイト集客|被リンク|nofollow/iu' ),
 			array( 'weak', '無償オファー（「費用は一切かかりません」等。「かかりませんか？」の質問形は除外）', 1,
@@ -242,22 +259,22 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 			array( 'weak', '売り込み特有の語（親和性）', 1, '/親和性/u' ),
 			array( 'weak', '代理店・パートナー勧誘の語', 1, '/(販売)?代理店(募集|制度|様)|パートナー(募集|制度|企業様)/u' ),
 			array( 'weak', '商談・日程調整の呼びかけ', 1,
-				'/(打ち合わせ|商談|WEB会議|ウェブ会議|オンライン(で)?の?面談)[^。]{0,18}(機会|お時間|日程)|ご都合の(良い|よい|宜しい|よろしい)日(時|程)|日程調整/u' ),
+				'/(打ち合わせ|商談|WEB会議|ウェブ会議|オンライン(で)?の?(面談|MTG|ミーティング|お?打ち合わせ))[^。]{0,28}(機会|お時間|日程)|ご都合の(良い|よい|宜しい|よろしい)日(時|程)|日程調整/iu' ),
 		);
 	}
 
 	/**
-	 * 内蔵フィルターの営業メール判定エンジン（相互リンクフィルター・営業メールフィルター共用）。
+	 * 内蔵フィルターの営業メール判定エンジン（相互リンク・営業メール・外注／パートナーフィルター共用）。
 	 *
 	 * 誤ブロックを防ぐため、判定は2段構えにしている。
 	 *   (1) 強シグナル（各フィルターの核心・+2点）が無ければ、他が揃ってもそのフィルターはブロックしない
 	 *       - 相互リンクフィルターの核心: 相互リンク等の「載せ合う提案」の依頼用語
-	 *       - 営業メールフィルターの核心: 「配信停止はこちら」等の一斉配信メールの定型文
-	 *         （「配信停止してください」という正当な依頼文は一致しない）
+	 *       - 営業メールフィルターの核心: 「配信停止はこちら」等の定型文・商談予約URL・提案申し出
+	 *       - 外注・パートナーフィルターの核心: 外部パートナー・外注／下請け・フリーランス案件希望・制作支援等の申し出
 	 *   (2) 核心があっても、弱シグナルを合わせて合計3点未満なら通過
 	 * 被リンク・nofollow・SEO などは正当な顧客も使う語なので強シグナルにしない。
 	 *
-	 * @return array{score:int, core_link:bool, core_sales:bool, blocked_link:bool, blocked_sales:bool, rows:array}
+	 * @return array{score:int, core_link:bool, core_sales:bool, core_partner:bool, blocked_link:bool, blocked_sales:bool, blocked_partner:bool, rows:array}
 	 *         rows: 各シグナルの array{label:string, points:int, max:int, matched:string}
 	 *         （ブロックチェッカーの内訳表示と判定本体で共用）
 	 */
@@ -266,10 +283,11 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 
 		$signals = self::filter_signals();
 
-		$score      = 0;
-		$core_link  = false;
-		$core_sales = false;
-		$rows       = array();
+		$score        = 0;
+		$core_link    = false;
+		$core_sales   = false;
+		$core_partner = false;
+		$rows         = array();
 		foreach ( $signals as $signal ) {
 			list( $genre, $label, $points, $pattern ) = $signal;
 			$matched = '';
@@ -289,6 +307,8 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 						$core_link = true;
 					} elseif ( 'sales' === $genre ) {
 						$core_sales = true;
+					} elseif ( 'partner' === $genre ) {
+						$core_partner = true;
 					}
 				}
 			}
@@ -301,12 +321,14 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 		}
 
 		return array(
-			'score'         => $score,
-			'core_link'     => $core_link,
-			'core_sales'    => $core_sales,
-			'blocked_link'  => ( $core_link && $score >= 3 ),
-			'blocked_sales' => ( $core_sales && $score >= 3 ),
-			'rows'          => $rows,
+			'score'           => $score,
+			'core_link'       => $core_link,
+			'core_sales'      => $core_sales,
+			'core_partner'    => $core_partner,
+			'blocked_link'    => ( $core_link && $score >= 3 ),
+			'blocked_sales'   => ( $core_sales && $score >= 3 ),
+			'blocked_partner' => ( $core_partner && $score >= 3 ),
+			'rows'            => $rows,
 		);
 	}
 
@@ -325,6 +347,12 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 	public static function is_sales_mail_value( $value ) {
 		$breakdown = self::filter_breakdown( $value );
 		return $breakdown['blocked_sales'];
+	}
+
+	/** 外注・パートナーフィルター: 制作パートナー・業務委託・フリーランス案件希望等の営業メールか。 */
+	public static function is_partner_mail_value( $value ) {
+		$breakdown = self::filter_breakdown( $value );
+		return $breakdown['blocked_partner'];
 	}
 
 	/**

@@ -79,10 +79,12 @@ class CF7SB_Blocklist {
 			'keywords'   => isset( $stored['keywords'] ) ? (array) $stored['keywords'] : array(),
 			'patterns'   => isset( $stored['patterns'] ) ? (array) $stored['patterns'] : array(),
 			'message'    => isset( $stored['message'] ) ? (string) $stored['message'] : '',
-			'block_uuid' => isset( $stored['block_uuid'] ) ? (bool) $stored['block_uuid'] : true,
-			'block_link' => isset( $stored['block_link'] ) ? (bool) $stored['block_link'] : false,
+			'block_uuid'    => isset( $stored['block_uuid'] ) ? (bool) $stored['block_uuid'] : true,
+			'block_link'    => isset( $stored['block_link'] ) ? (bool) $stored['block_link'] : false,
 			// v2.12.0で相互リンクフィルターから分離。未保存の間は旧設定を引き継ぐ（更新直後の保護切れを防ぐ）
-			'block_sales' => isset( $stored['block_sales'] ) ? (bool) $stored['block_sales'] : ( isset( $stored['block_link'] ) && (bool) $stored['block_link'] ),
+			'block_sales'   => isset( $stored['block_sales'] ) ? (bool) $stored['block_sales'] : ( isset( $stored['block_link'] ) && (bool) $stored['block_link'] ),
+			// v2.16.0で外注・パートナーフィルターを追加。未保存の間は営業メールフィルターの設定を引き継ぐ
+			'block_partner' => isset( $stored['block_partner'] ) ? (bool) $stored['block_partner'] : ( isset( $stored['block_sales'] ) ? (bool) $stored['block_sales'] : ( isset( $stored['block_link'] ) && (bool) $stored['block_link'] ) ),
 		);
 	}
 
@@ -101,19 +103,20 @@ class CF7SB_Blocklist {
 		return self::get_setting( 'message' );
 	}
 
-	private static function store_lists( $domains, $keywords, $emails = array(), $message = '', $patterns = array(), $block_uuid = true, $block_link = false, $block_sales = false ) {
-		$stored               = get_option( self::OPTION_LIST, array() );
-		$stored['domains']    = self::sanitize_lines( $domains );
-		$stored['emails']     = self::sanitize_lines( $emails );
-		$stored['keywords']   = self::sanitize_lines( $keywords );
-		$stored['patterns']   = self::sanitize_patterns( $patterns );
-		$stored['message']    = trim( wp_strip_all_tags( (string) $message ) );
-		$stored['block_uuid'] = (bool) $block_uuid;
-		$stored['block_link'] = (bool) $block_link;
-		$stored['block_sales'] = (bool) $block_sales;
-		$stored['fetched_at'] = time();
-		$stored['checked_at'] = time();
-		$stored['error']      = '';
+	private static function store_lists( $domains, $keywords, $emails = array(), $message = '', $patterns = array(), $block_uuid = true, $block_link = false, $block_sales = false, $block_partner = false ) {
+		$stored                  = get_option( self::OPTION_LIST, array() );
+		$stored['domains']       = self::sanitize_lines( $domains );
+		$stored['emails']        = self::sanitize_lines( $emails );
+		$stored['keywords']      = self::sanitize_lines( $keywords );
+		$stored['patterns']      = self::sanitize_patterns( $patterns );
+		$stored['message']       = trim( wp_strip_all_tags( (string) $message ) );
+		$stored['block_uuid']    = (bool) $block_uuid;
+		$stored['block_link']    = (bool) $block_link;
+		$stored['block_sales']   = (bool) $block_sales;
+		$stored['block_partner'] = (bool) $block_partner;
+		$stored['fetched_at']    = time();
+		$stored['checked_at']    = time();
+		$stored['error']         = '';
 		update_option( self::OPTION_LIST, $stored, false );
 	}
 
@@ -176,7 +179,7 @@ class CF7SB_Blocklist {
 				'role'    => 'central',
 			) );
 			$data = CF7SB_Server::get_list( $server_list );
-			self::store_lists( $data['domains'], $data['keywords'], $data['emails'], $data['message'], $data['patterns'], $data['block_uuid'], $data['block_link'], $data['block_sales'] );
+			self::store_lists( $data['domains'], $data['keywords'], $data['emails'], $data['message'], $data['patterns'], $data['block_uuid'], $data['block_link'], $data['block_sales'], $data['block_partner'] );
 			return true;
 		}
 
@@ -219,7 +222,8 @@ class CF7SB_Blocklist {
 			isset( $data['patterns'] ) ? $data['patterns'] : array(),
 			isset( $data['block_uuid'] ) ? (bool) $data['block_uuid'] : true,
 			isset( $data['block_link'] ) ? (bool) $data['block_link'] : false,
-			isset( $data['block_sales'] ) ? (bool) $data['block_sales'] : false
+			isset( $data['block_sales'] ) ? (bool) $data['block_sales'] : false,
+			isset( $data['block_partner'] ) ? (bool) $data['block_partner'] : ( isset( $data['block_sales'] ) ? (bool) $data['block_sales'] : false )
 		);
 		return true;
 	}
@@ -231,10 +235,11 @@ class CF7SB_Blocklist {
 	 * @param string[] $keywords
 	 * @return true|WP_Error
 	 */
-	public static function push( $domains, $keywords, $emails = array(), $message = '', $patterns = array(), $block_uuid = true, $block_link = false, $block_sales = false ) {
-		$block_uuid = (bool) $block_uuid;
-		$block_link = (bool) $block_link;
-		$block_sales = (bool) $block_sales;
+	public static function push( $domains, $keywords, $emails = array(), $message = '', $patterns = array(), $block_uuid = true, $block_link = false, $block_sales = false, $block_partner = false ) {
+		$block_uuid    = (bool) $block_uuid;
+		$block_link    = (bool) $block_link;
+		$block_sales   = (bool) $block_sales;
+		$block_partner = (bool) $block_partner;
 		$url = self::get_setting( 'url' );
 		$key = self::get_setting( 'key' );
 
@@ -258,28 +263,30 @@ class CF7SB_Blocklist {
 				return new WP_Error( 'cf7sb_push_failed', '秘密キーが一致しません。' );
 			}
 			$saved = CF7SB_Server::save_list( $server_list, array(
-				'domains'    => $clean_domains,
-				'emails'     => $clean_emails,
-				'keywords'   => $clean_keywords,
-				'patterns'   => $clean_patterns,
-				'block_uuid' => $block_uuid,
-				'block_link' => $block_link,
-				'block_sales' => $block_sales,
-				'message'    => $clean_message,
+				'domains'       => $clean_domains,
+				'emails'        => $clean_emails,
+				'keywords'      => $clean_keywords,
+				'patterns'      => $clean_patterns,
+				'block_uuid'    => $block_uuid,
+				'block_link'    => $block_link,
+				'block_sales'   => $block_sales,
+				'block_partner' => $block_partner,
+				'message'       => $clean_message,
 			) );
-			self::store_lists( $saved['domains'], $saved['keywords'], $saved['emails'], $saved['message'], $saved['patterns'], isset( $saved['block_uuid'] ) ? (bool) $saved['block_uuid'] : true, isset( $saved['block_link'] ) ? (bool) $saved['block_link'] : false, isset( $saved['block_sales'] ) ? (bool) $saved['block_sales'] : false );
+			self::store_lists( $saved['domains'], $saved['keywords'], $saved['emails'], $saved['message'], $saved['patterns'], isset( $saved['block_uuid'] ) ? (bool) $saved['block_uuid'] : true, isset( $saved['block_link'] ) ? (bool) $saved['block_link'] : false, isset( $saved['block_sales'] ) ? (bool) $saved['block_sales'] : false, isset( $saved['block_partner'] ) ? (bool) $saved['block_partner'] : false );
 			return true;
 		}
 
 		$body = wp_json_encode( array(
-			'domains'  => $clean_domains,
-			'emails'   => $clean_emails,
-			'keywords' => $clean_keywords,
-			'patterns' => $clean_patterns,
-			'block_uuid' => $block_uuid,
-			'block_link' => $block_link,
-			'block_sales' => $block_sales,
-			'message'  => $clean_message,
+			'domains'       => $clean_domains,
+			'emails'        => $clean_emails,
+			'keywords'      => $clean_keywords,
+			'patterns'      => $clean_patterns,
+			'block_uuid'    => $block_uuid,
+			'block_link'    => $block_link,
+			'block_sales'   => $block_sales,
+			'block_partner' => $block_partner,
+			'message'       => $clean_message,
 		) );
 
 		$response = wp_remote_post( $url, array(
@@ -316,10 +323,11 @@ class CF7SB_Blocklist {
 				isset( $saved['patterns'] ) ? $saved['patterns'] : $clean_patterns,
 				isset( $saved['block_uuid'] ) ? (bool) $saved['block_uuid'] : $block_uuid,
 				isset( $saved['block_link'] ) ? (bool) $saved['block_link'] : $block_link,
-				isset( $saved['block_sales'] ) ? (bool) $saved['block_sales'] : $block_sales
+				isset( $saved['block_sales'] ) ? (bool) $saved['block_sales'] : $block_sales,
+				isset( $saved['block_partner'] ) ? (bool) $saved['block_partner'] : $block_partner
 			);
 		} else {
-			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message, $clean_patterns, $block_uuid, $block_link, $block_sales );
+			self::store_lists( $clean_domains, $clean_keywords, $clean_emails, $clean_message, $clean_patterns, $block_uuid, $block_link, $block_sales, $block_partner );
 		}
 		return true;
 	}
@@ -537,6 +545,7 @@ class CF7SB_Blocklist {
 			'uuid'    => '内蔵: UUID管理番号',
 			'link'    => '内蔵: 相互リンクフィルター',
 			'sales'   => '内蔵: 営業メールフィルター',
+			'partner' => '内蔵: 外注・パートナーフィルター',
 		);
 		return isset( $labels[ $rule ] ) ? $labels[ $rule ] : ( $rule ? $rule : '不明' );
 	}

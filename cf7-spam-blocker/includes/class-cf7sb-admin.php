@@ -98,11 +98,12 @@ class CF7SB_Admin {
 		if ( '' === $message_text ) {
 			$message_text = '迷惑行為と判定されたため送信を拒否しました。';
 		}
-		$block_uuid = ! empty( $_POST['cf7sb_block_uuid'] );
-		$block_link = ! empty( $_POST['cf7sb_block_link'] );
-		$block_sales = ! empty( $_POST['cf7sb_block_sales'] );
+		$block_uuid    = ! empty( $_POST['cf7sb_block_uuid'] );
+		$block_link    = ! empty( $_POST['cf7sb_block_link'] );
+		$block_sales   = ! empty( $_POST['cf7sb_block_sales'] );
+		$block_partner = ! empty( $_POST['cf7sb_block_partner'] );
 
-		$pending = array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'patterns' => $patterns_text, 'message' => $message_text, 'block_uuid' => $block_uuid, 'block_link' => $block_link, 'block_sales' => $block_sales );
+		$pending = array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'patterns' => $patterns_text, 'message' => $message_text, 'block_uuid' => $block_uuid, 'block_link' => $block_link, 'block_sales' => $block_sales, 'block_partner' => $block_partner );
 
 		// 正規表現として不正なパターンは保存前に弾いて知らせる（黙って消さない）
 		$invalid_patterns = array();
@@ -126,7 +127,8 @@ class CF7SB_Admin {
 			preg_split( '/\r\n|\r|\n/', $patterns_text ),
 			$block_uuid,
 			$block_link,
-			$block_sales
+			$block_sales,
+			$block_partner
 		);
 		if ( is_wp_error( $pushed ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $pushed->get_error_message(), MINUTE_IN_SECONDS );
@@ -527,8 +529,14 @@ class CF7SB_Admin {
 									<?php checked( $list['block_sales'] ); ?> <?php disabled( ! $can_edit ); ?>>
 								営業メールフィルター（全サイト共通）
 							</label>
-							<p class="description">「配信停止はこちら」のような一斉配信メールの定型文を含む営業メールを自動判定でブロックします。</p>
-							<p class="description" style="margin-top:0.8em;">どちらのフィルターも、複数の条件がそろったときだけ反応するため正当な問い合わせは通過します。判定の内訳は「判定チェッカー」タブで確認できます。</p>
+							<p class="description">「配信停止はこちら」「ご興味がございましたら」「ご提案させていただきたく」や商談予約URLなどを含む営業メールを自動判定でブロックします。</p>
+							<label style="display:block; margin-top:0.8em;">
+								<input type="checkbox" name="cf7sb_block_partner" value="1"
+									<?php checked( $list['block_partner'] ); ?> <?php disabled( ! $can_edit ); ?>>
+								外注・パートナーフィルター（全サイト共通）
+							</label>
+							<p class="description">「外部パートナーとして」「外注先として」「ポートフォリオ」「お力添えできれば」など、外注・協業・フリーランス案件獲得の売り込みメールを自動判定でブロックします。</p>
+							<p class="description" style="margin-top:0.8em;">いずれのフィルターも、複数の条件がそろったときだけ反応するため正当な問い合わせは通過します。判定の内訳は「判定チェッカー」タブで確認できます。</p>
 						</td>
 					</tr>
 				</table>
@@ -773,8 +781,9 @@ class CF7SB_Admin {
 									<th style="font-weight:normal;">
 										<?php
 										$chk_filters = array(
-											array( '相互リンクフィルター', $list['block_link'], $chk_bd['blocked_link'], $chk_bd['core_link'], '依頼の核心語' ),
-											array( '営業メールフィルター', $list['block_sales'], $chk_bd['blocked_sales'], $chk_bd['core_sales'], '一斉配信メールの定型文' ),
+											array( '相互リンクフィルター', $list['block_link'], $chk_bd['blocked_link'], $chk_bd['core_link'], '相互リンクの核心シグナル' ),
+											array( '営業メールフィルター', $list['block_sales'], $chk_bd['blocked_sales'], $chk_bd['core_sales'], '営業メールの核心シグナル' ),
+											array( '外注・パートナーフィルター', $list['block_partner'], $chk_bd['blocked_partner'], $chk_bd['core_partner'], '外注・パートナーの核心シグナル' ),
 										);
 										foreach ( $chk_filters as $chk_f ) :
 											list( $f_label, $f_enabled, $f_blocked, $f_core, $f_core_label ) = $chk_f;
@@ -814,7 +823,7 @@ class CF7SB_Admin {
 				<ol style="max-width:900px; margin-top:0;">
 					<li>フォームの各入力欄（メール・テキスト・本文・URL・電話）を順に照合します。</li>
 					<li>メールアドレス欄: 拒否メールアドレス（完全一致）→ 拒否ドメイン（サブドメイン含む）→ UUID管理番号・拒否パターン</li>
-					<li>本文・テキスト欄: 拒否ドメイン → 拒否メールアドレス → 拒否文字列 → 相互リンクフィルター → 営業メールフィルター → UUID管理番号 → 拒否パターン</li>
+					<li>本文・テキスト欄: 拒否ドメイン → 拒否メールアドレス → 拒否文字列 → 相互リンクフィルター → 営業メールフィルター → 外注・パートナーフィルター → UUID管理番号 → 拒否パターン</li>
 					<li>1つでも一致したらその場で送信をブロックし、最初に一致したルールを理由としてブロックログに記録します。</li>
 				</ol>
 
@@ -825,19 +834,19 @@ class CF7SB_Admin {
 				</p>
 				<p class="description">判定パターン（正規表現）: <code><?php echo esc_html( CF7SB_Blocklist::UUID_PATTERN ); ?></code></p>
 
-				<h2 style="margin:1.4em 0 0.4em;">内蔵ルール2: 相互リンクフィルター（現在: <?php echo $list['block_link'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）／ 営業メールフィルター（現在: <?php echo $list['block_sales'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）</h2>
+				<h2 style="margin:1.4em 0 0.4em;">内蔵ルール2: 相互リンクフィルター（現在: <?php echo $list['block_link'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）／ 営業メールフィルター（現在: <?php echo $list['block_sales'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）／ 外注・パートナーフィルター（現在: <?php echo $list['block_partner'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）</h2>
 				<p style="max-width:900px; margin-top:0;">
-					2つのフィルターは下表のシグナルを共有し、<strong>2段構え</strong>で判定します。誤ブロックを防ぐための設計です。
+					3つのフィルターは下表のシグナルを共有し、<strong>2段構え</strong>で判定します。誤ブロックを防ぐための設計です。
 				</p>
 				<ol style="max-width:900px; margin-top:0;">
 					<li><strong>核心シグナル（+2点）が無ければ、他が何点そろってもブロックしません。</strong><br>
-						相互リンクフィルターの核心は「依頼の核心語」、営業メールフィルターの核心は「一斉配信メールの定型文」です。</li>
-					<li>核心シグナルがある場合のみ、共通の加点条件（各+1点）を合算し、<strong>合計3点以上</strong>でブロックします。</li>
+						各フィルターに対応する核心シグナルが1つ以上一致することが必須条件です。</li>
+					<li>核心シグナルがある場合のみ、他の核心シグナルや共通の加点条件（各+1点）を合算し、<strong>合計3点以上</strong>でブロックします。</li>
 				</ol>
 				<table class="widefat striped" style="max-width:1100px;">
 					<thead>
 						<tr>
-							<th style="width:190px;">種別</th>
+							<th style="width:210px;">種別</th>
 							<th style="width:70px; text-align:center;">加点</th>
 							<th style="width:34%;">シグナル</th>
 							<th>判定パターン（正規表現）</th>
@@ -846,9 +855,10 @@ class CF7SB_Admin {
 					<tbody>
 						<?php
 						$genre_labels = array(
-							'link'  => '<strong>相互リンクフィルターの核心</strong>',
-							'sales' => '<strong>営業メールフィルターの核心</strong>',
-							'weak'  => '共通の加点条件',
+							'link'    => '<strong>相互リンクフィルターの核心</strong>',
+							'sales'   => '<strong>営業メールフィルターの核心</strong>',
+							'partner' => '<strong>外注・パートナーフィルターの核心</strong>',
+							'weak'    => '共通の加点条件',
 						);
 						foreach ( CF7SB_Validator::filter_signals() as $rule_signal ) :
 							list( $sig_genre, $sig_label, $sig_points, $sig_pattern ) = $rule_signal;
