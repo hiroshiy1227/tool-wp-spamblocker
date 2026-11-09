@@ -155,15 +155,19 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 		}
 		$list = CF7SB_Blocklist::get();
 
-		foreach ( $list['emails'] as $email ) {
-			if ( strtolower( trim( $email ) ) === $value ) {
-				return array( 'rule' => 'email', 'matched' => $email );
+		if ( ! empty( $list['block_emails'] ) ) {
+			foreach ( $list['emails'] as $email ) {
+				if ( strtolower( trim( $email ) ) === $value ) {
+					return array( 'rule' => 'email', 'matched' => $email );
+				}
 			}
 		}
-		foreach ( $list['domains'] as $domain ) {
-			// 完全一致＋サブドメインも対象
-			if ( preg_match( '/@([a-z0-9\-]+\.)*' . preg_quote( strtolower( $domain ), '/' ) . '$/i', $value ) ) {
-				return array( 'rule' => 'domain', 'matched' => $domain );
+		if ( ! empty( $list['block_domains'] ) ) {
+			foreach ( $list['domains'] as $domain ) {
+				// 完全一致＋サブドメインも対象
+				if ( preg_match( '/@([a-z0-9\-]+\.)*' . preg_quote( strtolower( $domain ), '/' ) . '$/i', $value ) ) {
+					return array( 'rule' => 'domain', 'matched' => $domain );
+				}
 			}
 		}
 		return null;
@@ -175,7 +179,7 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 
 	/**
 	 * テキスト/本文欄の値がブロック対象なら理由を返す
-	 * （拒否ドメイン・拒否メールアドレス・拒否文字列を含む／相互リンク／拒否パターン）。
+	 * （拒否ドメイン・拒否メールアドレス・拒否文字列を含む／相互リンク／外注・パートナー／営業メール／拒否パターン）。
 	 *
 	 * @return array{rule: string, matched: string}|null
 	 */
@@ -186,11 +190,16 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 		}
 		$list = CF7SB_Blocklist::get();
 
-		$groups = array(
-			'domain'  => $list['domains'],
-			'email'   => $list['emails'],
-			'keyword' => $list['keywords'],
-		);
+		$groups = array();
+		if ( ! empty( $list['block_domains'] ) ) {
+			$groups['domain'] = $list['domains'];
+		}
+		if ( ! empty( $list['block_emails'] ) ) {
+			$groups['email'] = $list['emails'];
+		}
+		if ( ! empty( $list['block_keywords'] ) ) {
+			$groups['keyword'] = $list['keywords'];
+		}
 		foreach ( $groups as $rule => $needles ) {
 			foreach ( $needles as $needle ) {
 				if ( false !== stripos( $value, $needle ) ) {
@@ -201,11 +210,13 @@ padding:1.2em 1.4em;margin:1em 0;font-weight:700;line-height:1.6;text-align:cent
 		if ( ! empty( $list['block_link'] ) && self::is_link_exchange_value( $value ) ) {
 			return array( 'rule' => 'link', 'matched' => self::link_exchange_score( $value ) . '点' );
 		}
-		if ( ! empty( $list['block_sales'] ) && self::is_sales_mail_value( $value ) ) {
-			return array( 'rule' => 'sales', 'matched' => self::link_exchange_score( $value ) . '点' );
-		}
+		// 外注・パートナー営業は一般的な営業メール文句（ご提案・ご興味等）を含むことが多いため、
+		// 汎用的な営業メールフィルターより先に特化フィルターである外注・パートナーフィルターを判定する。
 		if ( ! empty( $list['block_partner'] ) && self::is_partner_mail_value( $value ) ) {
 			return array( 'rule' => 'partner', 'matched' => self::link_exchange_score( $value ) . '点' );
+		}
+		if ( ! empty( $list['block_sales'] ) && self::is_sales_mail_value( $value ) ) {
+			return array( 'rule' => 'sales', 'matched' => self::link_exchange_score( $value ) . '点' );
 		}
 		return self::detect_pattern( $value );
 	}

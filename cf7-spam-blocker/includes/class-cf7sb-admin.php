@@ -90,20 +90,43 @@ class CF7SB_Admin {
 		}
 		check_admin_referer( 'cf7sb_save_blocklist' );
 
-		$domains_text  = isset( $_POST['cf7sb_domains'] ) ? (string) wp_unslash( $_POST['cf7sb_domains'] ) : '';
-		$emails_text   = isset( $_POST['cf7sb_emails'] ) ? (string) wp_unslash( $_POST['cf7sb_emails'] ) : '';
-		$keywords_text = isset( $_POST['cf7sb_keywords'] ) ? (string) wp_unslash( $_POST['cf7sb_keywords'] ) : '';
-		$patterns_text = isset( $_POST['cf7sb_patterns'] ) ? (string) wp_unslash( $_POST['cf7sb_patterns'] ) : '';
-		$message_text  = isset( $_POST['cf7sb_block_message'] ) ? sanitize_text_field( wp_unslash( $_POST['cf7sb_block_message'] ) ) : '';
+		// 中央サーバーのみ設定可能。接続サイトからの変更は防止する
+		$settings  = CF7SB_Blocklist::get_settings();
+		$is_client = ( ! CF7SB_Server::is_enabled() && '' !== $settings['url'] );
+		if ( $is_client ) {
+			wp_die( 'ブロック設定は中央サーバーからのみ変更できます。接続サイトでは自動的に最新の設定が同期されます。' );
+		}
+
+		$domains_text   = isset( $_POST['cf7sb_domains'] ) ? (string) wp_unslash( $_POST['cf7sb_domains'] ) : '';
+		$emails_text    = isset( $_POST['cf7sb_emails'] ) ? (string) wp_unslash( $_POST['cf7sb_emails'] ) : '';
+		$keywords_text  = isset( $_POST['cf7sb_keywords'] ) ? (string) wp_unslash( $_POST['cf7sb_keywords'] ) : '';
+		$patterns_text  = isset( $_POST['cf7sb_patterns'] ) ? (string) wp_unslash( $_POST['cf7sb_patterns'] ) : '';
+		$message_text   = isset( $_POST['cf7sb_block_message'] ) ? sanitize_text_field( wp_unslash( $_POST['cf7sb_block_message'] ) ) : '';
 		if ( '' === $message_text ) {
 			$message_text = '迷惑行為と判定されたため送信を拒否しました。';
 		}
-		$block_uuid    = ! empty( $_POST['cf7sb_block_uuid'] );
-		$block_link    = ! empty( $_POST['cf7sb_block_link'] );
-		$block_sales   = ! empty( $_POST['cf7sb_block_sales'] );
-		$block_partner = ! empty( $_POST['cf7sb_block_partner'] );
+		$block_domains  = ! empty( $_POST['cf7sb_block_domains'] );
+		$block_emails   = ! empty( $_POST['cf7sb_block_emails'] );
+		$block_keywords = ! empty( $_POST['cf7sb_block_keywords'] );
+		$block_uuid     = ! empty( $_POST['cf7sb_block_uuid'] );
+		$block_link     = ! empty( $_POST['cf7sb_block_link'] );
+		$block_sales    = ! empty( $_POST['cf7sb_block_sales'] );
+		$block_partner  = ! empty( $_POST['cf7sb_block_partner'] );
 
-		$pending = array( 'domains' => $domains_text, 'emails' => $emails_text, 'keywords' => $keywords_text, 'patterns' => $patterns_text, 'message' => $message_text, 'block_uuid' => $block_uuid, 'block_link' => $block_link, 'block_sales' => $block_sales, 'block_partner' => $block_partner );
+		$pending = array(
+			'domains'        => $domains_text,
+			'emails'         => $emails_text,
+			'keywords'       => $keywords_text,
+			'patterns'       => $patterns_text,
+			'message'        => $message_text,
+			'block_domains'  => $block_domains,
+			'block_emails'   => $block_emails,
+			'block_keywords' => $block_keywords,
+			'block_uuid'     => $block_uuid,
+			'block_link'     => $block_link,
+			'block_sales'    => $block_sales,
+			'block_partner'  => $block_partner,
+		);
 
 		// 正規表現として不正なパターンは保存前に弾いて知らせる（黙って消さない）
 		$invalid_patterns = array();
@@ -128,7 +151,10 @@ class CF7SB_Admin {
 			$block_uuid,
 			$block_link,
 			$block_sales,
-			$block_partner
+			$block_partner,
+			$block_domains,
+			$block_emails,
+			$block_keywords
 		);
 		if ( is_wp_error( $pushed ) ) {
 			set_transient( 'cf7sb_last_error_' . get_current_user_id(), $pushed->get_error_message(), MINUTE_IN_SECONDS );
@@ -297,9 +323,12 @@ class CF7SB_Admin {
 			CF7SB_Blocklist::refresh();
 		}
 
-		$stored   = get_option( CF7SB_Blocklist::OPTION_LIST, array() );
-		$list     = CF7SB_Blocklist::get();
-		$can_edit = ( '' !== $settings['key'] );
+		$stored    = get_option( CF7SB_Blocklist::OPTION_LIST, array() );
+		$list      = CF7SB_Blocklist::get();
+		$is_server = CF7SB_Server::is_enabled();
+		$is_client = ( ! $is_server && '' !== $settings['url'] );
+		// 中央サーバーのみ編集可能。接続サイトは閲覧のみで自動同期される。未設定サイト（単体利用）は編集可能
+		$can_edit  = ! $is_client && ( '' !== $settings['key'] || '' === $settings['url'] );
 
 		$fetched_at = ! empty( $stored['fetched_at'] )
 			? wp_date( 'Y-m-d H:i:s', $stored['fetched_at'] )
@@ -321,10 +350,31 @@ class CF7SB_Admin {
 			$keywords_text = isset( $pending['keywords'] ) ? $pending['keywords'] : $keywords_text;
 			$patterns_text = isset( $pending['patterns'] ) ? $pending['patterns'] : $patterns_text;
 			$message_text  = isset( $pending['message'] ) ? $pending['message'] : $message_text;
+			if ( isset( $pending['block_domains'] ) ) {
+				$list['block_domains'] = (bool) $pending['block_domains'];
+			}
+			if ( isset( $pending['block_emails'] ) ) {
+				$list['block_emails'] = (bool) $pending['block_emails'];
+			}
+			if ( isset( $pending['block_keywords'] ) ) {
+				$list['block_keywords'] = (bool) $pending['block_keywords'];
+			}
+			if ( isset( $pending['block_uuid'] ) ) {
+				$list['block_uuid'] = (bool) $pending['block_uuid'];
+			}
+			if ( isset( $pending['block_link'] ) ) {
+				$list['block_link'] = (bool) $pending['block_link'];
+			}
+			if ( isset( $pending['block_sales'] ) ) {
+				$list['block_sales'] = (bool) $pending['block_sales'];
+			}
+			if ( isset( $pending['block_partner'] ) ) {
+				$list['block_partner'] = (bool) $pending['block_partner'];
+			}
 		}
 
 		// 誤設定防止: 中央サーバー以外のサイトでは、接続済みならURL・キーは閲覧のみ
-		$conn_locked = ! CF7SB_Server::is_enabled() && '' !== $settings['url'];
+		$conn_locked = $is_client;
 
 		$base_url = admin_url( 'admin.php?page=cf7sb' );
 		?>
@@ -460,7 +510,16 @@ class CF7SB_Admin {
 				<div class="notice notice-warning inline"><p><span class="dashicons dashicons-warning" style="color:#dba617; vertical-align:text-bottom;"></span> <strong>下の入力内容はまだ保存されていません。</strong>直前の保存が失敗したため、入力を復元して表示しています。上のエラーの原因を解消してから、もう一度「ブロックリストを保存」を押してください。</p></div>
 			<?php endif; ?>
 
-			<?php if ( ! $can_edit ) : ?>
+			<?php if ( $is_client ) : ?>
+				<div class="notice notice-info inline" style="max-width:800px;">
+					<p>
+						<span class="dashicons dashicons-info" style="color:#2271b1; vertical-align:text-bottom;"></span>
+						<strong>このサイトは接続サイトです。</strong>
+						ブロック設定や各フィルターのON/OFFは中央サーバー（<code><?php echo esc_html( wp_parse_url( $settings['url'], PHP_URL_HOST ) ); ?></code>）でのみ変更可能です。
+						中央サーバーで設定した内容が自動的にこのサイトにも反映されます（この画面では閲覧のみ可能です）。
+					</p>
+				</div>
+			<?php elseif ( ! $can_edit ) : ?>
 				<div class="notice notice-info inline"><p>書き込み用秘密キーが未設定のため、このサイトからは編集できません（自動取得は動作します）。</p></div>
 			<?php endif; ?>
 
@@ -479,33 +538,48 @@ class CF7SB_Admin {
 					<tr>
 						<th scope="row"><label for="cf7sb_domains">拒否ドメイン</label></th>
 						<td>
+							<label style="display:inline-block; margin-bottom:8px; font-weight:600;">
+								<input type="checkbox" name="cf7sb_block_domains" value="1"
+									<?php checked( $list['block_domains'] ); ?> <?php disabled( ! $can_edit ); ?>>
+								拒否ドメインを有効にする（全サイト共通）
+							</label>
 							<textarea id="cf7sb_domains" name="cf7sb_domains" rows="8" class="large-text code cf7sb-taglist"
 								data-cf7sb-label="拒否ドメイン" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $domains_text ); ?></textarea>
 							<p class="description">
 								<strong>会社のメールアドレス（独自ドメイン）から送ってくる相手に。</strong>
-								@より後ろ（例: <code>spam.com</code>）を登録すると、そのドメインのメールアドレスからの送信や、本文にそのドメインが書かれた送信をブロックします。
+								@より後ろ（例: <code>spam.com</code>）を登録すると、そのドメインのメールアドレスからの送信や、本文にそのドメインが書かれた送信をブロックします。チェックを外すと設定を残したまま無効化できます。
 							</p>
 						</td>
 					</tr>
 					<tr>
 						<th scope="row"><label for="cf7sb_emails">拒否メールアドレス</label></th>
 						<td>
+							<label style="display:inline-block; margin-bottom:8px; font-weight:600;">
+								<input type="checkbox" name="cf7sb_block_emails" value="1"
+									<?php checked( $list['block_emails'] ); ?> <?php disabled( ! $can_edit ); ?>>
+								拒否メールアドレスを有効にする（全サイト共通）
+							</label>
 							<textarea id="cf7sb_emails" name="cf7sb_emails" rows="8" class="large-text code cf7sb-taglist"
 								data-cf7sb-label="拒否メールアドレス" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $emails_text ); ?></textarea>
 							<p class="description">
 								<strong>gmail.com などフリーメールから送ってくる相手に。</strong>
-								アドレス単位（例: <code>spam@gmail.com</code>）で登録します。ドメインごと拒否すると、同じフリーメールを使う正当な問い合わせまで止まってしまうためです。
+								アドレス単位（例: <code>spam@gmail.com</code>）で登録します。ドメインごと拒否すると、同じフリーメールを使う正当な問い合わせまで止まってしまうためです。チェックを外すと設定を残したまま無効化できます。
 							</p>
 						</td>
 					</tr>
 					<tr>
 						<th scope="row"><label for="cf7sb_keywords">拒否文字列</label></th>
 						<td>
+							<label style="display:inline-block; margin-bottom:8px; font-weight:600;">
+								<input type="checkbox" name="cf7sb_block_keywords" value="1"
+									<?php checked( $list['block_keywords'] ); ?> <?php disabled( ! $can_edit ); ?>>
+								拒否文字列を有効にする（全サイト共通）
+							</label>
 							<textarea id="cf7sb_keywords" name="cf7sb_keywords" rows="8" class="large-text code cf7sb-taglist"
 								data-cf7sb-label="拒否文字列" <?php disabled( ! $can_edit ); ?>><?php echo esc_textarea( $keywords_text ); ?></textarea>
 							<p class="description">
 								<strong>決まった会社名・サービス名を名乗って何度も送ってくる相手に。</strong>
-								本文にこの言葉が含まれていればブロックします。（例: 株式会社スパム商事）
+								本文にこの言葉が含まれていればブロックします。（例: 株式会社スパム商事）。チェックを外すと設定を残したまま無効化できます。
 							</p>
 						</td>
 					</tr>
@@ -660,16 +734,26 @@ class CF7SB_Admin {
 								}
 								$mail_pattern = CF7SB_Validator::detect_pattern( $chk_email );
 								$mail_rows    = array(
-									array( '拒否メールアドレス（完全一致・' . count( $list['emails'] ) . '件登録）', $hit_emails ),
-									array( '拒否ドメイン（サブドメイン含む・' . count( $list['domains'] ) . '件登録）', $hit_domains ),
-									array( '拒否パターン・UUID管理番号', $mail_pattern ? array( $mail_pattern['matched'] ) : array() ),
+									array( '拒否メールアドレス（完全一致・' . count( $list['emails'] ) . '件登録）', $hit_emails, $list['block_emails'] ),
+									array( '拒否ドメイン（サブドメイン含む・' . count( $list['domains'] ) . '件登録）', $hit_domains, $list['block_domains'] ),
+									array( '拒否パターン・UUID管理番号', $mail_pattern ? array( $mail_pattern['matched'] ) : array(), true ),
 								);
 								foreach ( $mail_rows as $mail_row ) :
-									list( $row_label, $row_hits ) = $mail_row;
+									list( $row_label, $row_hits, $row_enabled ) = $mail_row;
 								?>
 									<tr>
-										<td><?php echo esc_html( $row_label ); ?></td>
-										<td><?php echo $row_hits ? '<span style="color:#d63638; font-weight:600;">一致</span>' : '<span style="color:#00a32a;">該当なし</span>'; ?></td>
+										<td><?php echo esc_html( $row_label ); ?><?php if ( ! $row_enabled ) : ?> <span style="color:#8c8f94;">（無効）</span><?php endif; ?></td>
+										<td>
+											<?php
+											if ( $row_hits && $row_enabled ) {
+												echo '<span style="color:#d63638; font-weight:600;">一致</span>';
+											} elseif ( $row_hits ) {
+												echo '<span style="color:#8c8f94;">一致（無効のため対象外）</span>';
+											} else {
+												echo '<span style="color:#00a32a;">該当なし</span>';
+											}
+											?>
+										</td>
 										<td><?php echo $row_hits ? '<code>' . implode( '</code> <code>', array_map( 'esc_html', $row_hits ) ) . '</code>' : '&mdash;'; ?></td>
 									</tr>
 								<?php endforeach; ?>
@@ -685,12 +769,12 @@ class CF7SB_Admin {
 							<tbody>
 								<?php
 								$body_cats = array(
-									array( '拒否ドメイン', $list['domains'] ),
-									array( '拒否メールアドレス', $list['emails'] ),
-									array( '拒否文字列', $list['keywords'] ),
+									array( '拒否ドメイン', $list['domains'], $list['block_domains'] ),
+									array( '拒否メールアドレス', $list['emails'], $list['block_emails'] ),
+									array( '拒否文字列', $list['keywords'], $list['block_keywords'] ),
 								);
 								foreach ( $body_cats as $body_cat ) :
-									list( $cat_label, $cat_needles ) = $body_cat;
+									list( $cat_label, $cat_needles, $cat_enabled ) = $body_cat;
 									$cat_hits = array();
 									foreach ( $cat_needles as $needle ) {
 										if ( '' !== $needle && false !== mb_stripos( $chk_body, $needle ) ) {
@@ -699,8 +783,18 @@ class CF7SB_Admin {
 									}
 								?>
 									<tr>
-										<td><?php echo esc_html( $cat_label . '（' . count( $cat_needles ) . '件登録）' ); ?></td>
-										<td><?php echo $cat_hits ? '<span style="color:#d63638; font-weight:600;">一致</span>' : '<span style="color:#00a32a;">該当なし</span>'; ?></td>
+										<td><?php echo esc_html( $cat_label . '（' . count( $cat_needles ) . '件登録）' ); ?><?php if ( ! $cat_enabled ) : ?> <span style="color:#8c8f94;">（無効）</span><?php endif; ?></td>
+										<td>
+											<?php
+											if ( $cat_hits && $cat_enabled ) {
+												echo '<span style="color:#d63638; font-weight:600;">一致</span>';
+											} elseif ( $cat_hits ) {
+												echo '<span style="color:#8c8f94;">一致（無効のため対象外）</span>';
+											} else {
+												echo '<span style="color:#00a32a;">該当なし</span>';
+											}
+											?>
+										</td>
 										<td>
 											<?php
 											if ( $cat_hits ) {
@@ -782,8 +876,8 @@ class CF7SB_Admin {
 										<?php
 										$chk_filters = array(
 											array( '相互リンクフィルター', $list['block_link'], $chk_bd['blocked_link'], $chk_bd['core_link'], '相互リンクの核心シグナル' ),
-											array( '営業メールフィルター', $list['block_sales'], $chk_bd['blocked_sales'], $chk_bd['core_sales'], '営業メールの核心シグナル' ),
 											array( '外注・パートナーフィルター', $list['block_partner'], $chk_bd['blocked_partner'], $chk_bd['core_partner'], '外注・パートナーの核心シグナル' ),
+											array( '営業メールフィルター', $list['block_sales'], $chk_bd['blocked_sales'], $chk_bd['core_sales'], '営業メールの核心シグナル' ),
 										);
 										foreach ( $chk_filters as $chk_f ) :
 											list( $f_label, $f_enabled, $f_blocked, $f_core, $f_core_label ) = $chk_f;
@@ -823,7 +917,7 @@ class CF7SB_Admin {
 				<ol style="max-width:900px; margin-top:0;">
 					<li>フォームの各入力欄（メール・テキスト・本文・URL・電話）を順に照合します。</li>
 					<li>メールアドレス欄: 拒否メールアドレス（完全一致）→ 拒否ドメイン（サブドメイン含む）→ UUID管理番号・拒否パターン</li>
-					<li>本文・テキスト欄: 拒否ドメイン → 拒否メールアドレス → 拒否文字列 → 相互リンクフィルター → 営業メールフィルター → 外注・パートナーフィルター → UUID管理番号 → 拒否パターン</li>
+					<li>本文・テキスト欄: 拒否ドメイン → 拒否メールアドレス → 拒否文字列 → 相互リンクフィルター → 外注・パートナーフィルター → 営業メールフィルター → UUID管理番号 → 拒否パターン</li>
 					<li>1つでも一致したらその場で送信をブロックし、最初に一致したルールを理由としてブロックログに記録します。</li>
 				</ol>
 
@@ -834,7 +928,7 @@ class CF7SB_Admin {
 				</p>
 				<p class="description">判定パターン（正規表現）: <code><?php echo esc_html( CF7SB_Blocklist::UUID_PATTERN ); ?></code></p>
 
-				<h2 style="margin:1.4em 0 0.4em;">内蔵ルール2: 相互リンクフィルター（現在: <?php echo $list['block_link'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）／ 営業メールフィルター（現在: <?php echo $list['block_sales'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）／ 外注・パートナーフィルター（現在: <?php echo $list['block_partner'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）</h2>
+				<h2 style="margin:1.4em 0 0.4em;">内蔵ルール2: 相互リンクフィルター（現在: <?php echo $list['block_link'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）／ 外注・パートナーフィルター（現在: <?php echo $list['block_partner'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）／ 営業メールフィルター（現在: <?php echo $list['block_sales'] ? '有効' : '<span style="color:#8c8f94;">無効</span>'; ?>）</h2>
 				<p style="max-width:900px; margin-top:0;">
 					3つのフィルターは下表のシグナルを共有し、<strong>2段構え</strong>で判定します。誤ブロックを防ぐための設計です。
 				</p>
