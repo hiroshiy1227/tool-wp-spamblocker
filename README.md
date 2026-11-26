@@ -25,6 +25,7 @@ CF7 の Turnstile（Cloudflare のロボット確認）を有効にしている�
 - スパム判定になったら：確認を取り直して1回だけ自動で送り直す（ブロックリストによる拒否は送り直さない）
 - Turnstile の検証に失敗した送信を `cf7sb_turnstile_log` に記録（件数と最近50件。送り直しで送れたものは `recovered`）。確認：`wp option get cf7sb_turnstile_log --format=json`
 - 止めるとき：`add_filter( 'cf7sb_turnstile_guard', '__return_false' );`
+- （2.20.0〜）確認のウィジェットを「必要なときだけ表示」（data-appearance=interaction-only）にし、CF7 がフォームの先頭に足したものは送信ボタンの直前へ移す。**Cloudflare 側でウィジェットのモードを「管理（Managed）」にすると**、確認が自動で通らない環境（ブラウザの偽装・拡張機能など）でも送信ボタンのすぐ上にチェック欄が出て、利用者が自分で済ませられる（ふだんは何も表示されない）。チェックせずに送信すると、送らずに「すぐ上の確認（チェック）を済ませてから、もう一度送信してください。」と案内する。「非表示（Invisible）」のままのサイトでは見た目は変わらない。置き場所を変えたくないときは `cf7sb_turnstile_place` を false に
 
 ## 初回セットアップ
 

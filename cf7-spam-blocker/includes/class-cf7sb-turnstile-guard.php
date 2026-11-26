@@ -9,6 +9,7 @@
  * ・送信の直前：確認の値が空か4分より古ければ、取り直してから送る
  * ・スパム判定になったら：確認を取り直して1回だけ自動で送り直す
  * ・Turnstile の検証に失敗した件数・最近の記録を残す（オプション cf7sb_turnstile_log）
+ * ・ウィジェットを「必要なときだけ表示」にして送信ボタンの直前に置く（2.20.0〜。Cloudflare 側を Managed にすると効く）
  *
  * 無効にするとき：add_filter( 'cf7sb_turnstile_guard', '__return_false' );
  */
@@ -25,6 +26,37 @@ class CF7SB_Turnstile_Guard {
 	public static function init() {
 		add_action( 'wp_footer', array( __CLASS__, 'print_script' ), 30 );
 		add_action( 'wpcf7_submit', array( __CLASS__, 'record' ), 99, 2 );
+		add_filter( 'wpcf7_form_elements', array( __CLASS__, 'place_widget' ), 20 );
+	}
+
+	/**
+	 * 確認のウィジェットを「必要なときだけ表示」にし、CF7 がフォームの先頭に足したものは送信ボタンの直前へ移す。
+	 * Cloudflare 側でウィジェットを Managed にすると、確認が自動で通らない環境（ブラウザの偽装・拡張機能など）でも
+	 * 送信ボタンのすぐ上にチェック欄が出て、利用者が自分で済ませられる。ふだんは何も表示されない。
+	 * Invisible のままのサイトでは表示は変わらない（data-appearance は無視される）。
+	 */
+	public static function place_widget( $content ) {
+		if ( ! self::active() || ! apply_filters( 'cf7sb_turnstile_place', true ) ) {
+			return $content;
+		}
+		if ( ! preg_match( '/<div class="wpcf7-turnstile cf-turnstile"[^>]*><\/div>/', $content, $m, PREG_OFFSET_CAPTURE ) ) {
+			return $content;
+		}
+		$div = $m[0][0];
+		$pos = $m[0][1];
+		$new = false === strpos( $div, 'data-appearance=' ) ? str_replace( '<div ', '<div data-appearance="interaction-only" ', $div ) : $div;
+		if ( 0 === $pos ) { // CF7 が先頭に足したもの（フォームに [turnstile] を書いた場所はそのまま）
+			$rest = ltrim( substr( $content, strlen( $div ) ) );
+			if ( preg_match( '/<(?:input|button)\b[^>]*type="submit"/', $rest, $s, PREG_OFFSET_CAPTURE ) ) {
+				$at = $s[0][1];
+				// 送信ボタンが段落（自動整形の <p>）の先頭にあるときは、その段落の前に置く（<p> の中に <div> を入れない）
+				if ( preg_match( '/<p\b[^>]*>\s*$/', substr( $rest, 0, $at ), $pm, PREG_OFFSET_CAPTURE ) ) {
+					$at = $pm[0][1];
+				}
+				return substr_replace( $rest, $new . "\n", $at, 0 );
+			}
+		}
+		return substr_replace( $content, $new, $pos, strlen( $div ) );
 	}
 
 	private static function active() {
@@ -130,14 +162,37 @@ class CF7SB_Turnstile_Guard {
 	}
 	function refresh(f, cb) {
 		var i = input(f), w = f.querySelector('.cf-turnstile');
-		if (!i || !w || !window.turnstile) { cb(); return; }
+		if (!i || !w || !window.turnstile) { cb(true); return; }
 		var old = i.value, t0 = Date.now();
 		try { window.turnstile.reset(w); } catch (e) {}
 		var t = setInterval(function () {
 			var v = input(f).value;
-			if ((v && v !== old) || Date.now() - t0 > WAIT) { clearInterval(t); cb(); }
+			if (v && v !== old) { clearInterval(t); cb(true); }
+			else if (Date.now() - t0 > WAIT) { clearInterval(t); cb(false); }
 		}, 250);
 	}
+	// 確認のチェック欄が出ていて、まだ済んでいない（Managed のウィジェットで、自動で通らなかったとき）
+	function needsTap(f) {
+		var w = f.querySelector('.cf-turnstile'), i = input(f);
+		return !!(w && w.offsetHeight > 0 && i && !i.value);
+	}
+	function askTap(f) {
+		busy(f, false);
+		var w = f.querySelector('.cf-turnstile');
+		var n = f.querySelector('.cf7sb-ts-note');
+		if (!n && w) {
+			n = document.createElement('p');
+			n.className = 'cf7sb-ts-note';
+			n.style.cssText = 'margin:8px 0;color:#b45309;font-size:14px;font-weight:bold;line-height:1.6';
+			w.parentNode.insertBefore(n, w.nextSibling);
+		}
+		if (n) n.textContent = 'すぐ上の確認（チェック）を済ませてから、もう一度送信してください。';
+		if (w && w.scrollIntoView) w.scrollIntoView({ block: 'center', behavior: 'smooth' });
+	}
+	setInterval(function () { // 確認が済んだら案内を消す
+		var ns = document.querySelectorAll('.cf7sb-ts-note');
+		for (var k = 0; k < ns.length; k++) { var f = ns[k].closest('form'); if (f && input(f) && input(f).value) ns[k].remove(); }
+	}, 500);
 	function send(f, submitter) {
 		st(f).auto = true;
 		busy(f, false);
@@ -157,9 +212,10 @@ class CF7SB_Turnstile_Guard {
 		if (i.value && s.at && Date.now() - s.at < MAX_AGE) return;
 		e.preventDefault();
 		e.stopImmediatePropagation();
+		if (needsTap(f)) { askTap(f); return; }
 		var submitter = e.submitter || null;
 		busy(f, true);
-		refresh(f, function () { send(f, submitter); });
+		refresh(f, function (ok) { if (!ok && needsTap(f)) askTap(f); else send(f, submitter); });
 	}, true);
 	// スパム判定になったら：確認を取り直して1回だけ自動で送り直す
 	document.addEventListener('wpcf7spam', function (e) {
@@ -172,7 +228,7 @@ class CF7SB_Turnstile_Guard {
 		var out = f.querySelector('.wpcf7-response-output');
 		setTimeout(function () { if (out) out.textContent = '送信しています。そのままお待ちください…'; }, 0);
 		busy(f, true);
-		setTimeout(function () { refresh(f, function () { send(f, null); }); }, 300);
+		setTimeout(function () { refresh(f, function (ok) { if (!ok && needsTap(f)) askTap(f); else send(f, null); }); }, 300);
 	});
 })();
 </script>
